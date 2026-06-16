@@ -101,7 +101,7 @@ export function UploadProgress({
         <div className="mt-2 space-y-2">
           <p className="text-xs text-[#dc2626]">{error}</p>
           {onRetryProcessing && (
-            <Button size="sm" onClick={onRetryProcessing}>
+            <Button variant="primary" size="sm" onClick={onRetryProcessing}>
               Retry processing
             </Button>
           )}

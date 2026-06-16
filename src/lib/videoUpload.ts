@@ -39,7 +39,11 @@ export function isResumableUploadError(error: unknown) {
 }
 
 export function isProcessingRetryError(error: unknown) {
-  return error instanceof ProcessingRetryError;
+  return (
+    error instanceof ProcessingRetryError ||
+    (error instanceof Error &&
+      error.message.includes("Mux ingest failed after upload."))
+  );
 }
 
 type UploadedPart = { partNumber: number; etag: string };
@@ -332,7 +336,10 @@ async function uploadMultipartFile(args: {
     resumeSession.uploadId === initiate.uploadId &&
     resumeSession.s3Key === initiate.key &&
     resumeSession.partSizeBytes === initiate.partSizeBytes &&
-    resumeSession.partCount === initiate.partCount;
+    resumeSession.partCount === initiate.partCount &&
+    resumeSession.fileSize === file.size &&
+    resumeSession.fileLastModified === file.lastModified &&
+    resumeSession.fileName === file.name;
   const completedParts = mergeUploadedParts(
     initiate.uploadedParts,
     canReuseResumeSession ? resumeSession.completedParts : [],
@@ -347,9 +354,8 @@ async function uploadMultipartFile(args: {
   ).filter((partNumber) => !completedMap.has(partNumber));
 
   let bytesUploaded = 0;
-  for (const [partNumber, etag] of completedMap) {
+  for (const partNumber of completedMap.keys()) {
     const { start, end } = getPartByteRange(file.size, initiate.partSizeBytes, partNumber);
-    void etag;
     bytesUploaded += end - start;
   }
 
@@ -533,10 +539,7 @@ export async function uploadVideoFile(args: {
   try {
     await args.actions.markUploadComplete({ videoId: args.videoId });
   } catch (error) {
-    if (
-      error instanceof Error &&
-      error.message.includes("Mux ingest failed after upload.")
-    ) {
+    if (isProcessingRetryError(error)) {
       throw new ProcessingRetryError(error);
     }
     throw error;

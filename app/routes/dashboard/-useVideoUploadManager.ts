@@ -185,7 +185,7 @@ export function useVideoUploadManager() {
         } catch (error) {
           const errorMessage =
             error instanceof Error ? error.message : "Upload failed";
-          const cancelled = errorMessage === "Upload cancelled";
+          const cancelled = abortController.signal.aborted;
           const resumable = isResumableUploadError(error);
           const canRetryProcessing = isProcessingRetryError(error);
 
@@ -270,9 +270,7 @@ export function useVideoUploadManager() {
       } catch (error) {
         const errorMessage =
           error instanceof Error ? error.message : "Processing failed";
-        const canRetryProcessing = errorMessage.includes(
-          "Mux ingest failed after upload.",
-        );
+        const canRetryProcessing = isProcessingRetryError(error);
         if (!canRetryProcessing) {
           await deleteUploadResumeSession(upload.videoId);
         }
