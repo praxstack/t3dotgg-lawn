@@ -43,6 +43,7 @@ const ALLOWED_UPLOAD_CONTENT_TYPES = new Set([
   "video/webm",
   "video/x-matroska",
 ]);
+const MUX_STATUS_SWEEP_BATCH_SIZE = 10;
 
 function getExtensionFromKey(key: string, fallback = "mp4") {
   let source = key;
@@ -344,6 +345,71 @@ async function ensurePublicPlaybackId(
   }
 
   return resolvedPlaybackId;
+}
+
+async function reconcileMuxAssetStatus(
+  ctx: ActionCtx,
+  params: {
+    videoId: Id<"videos">;
+    muxAssetId: string;
+  },
+) {
+  const processingVideo = await ctx.runQuery(
+    internal.videos.getMuxProcessingState,
+    {
+      videoId: params.videoId,
+    },
+  );
+  if (
+    !processingVideo ||
+    processingVideo.muxAssetId !== params.muxAssetId
+  ) {
+    return { status: "skipped" as const };
+  }
+
+  const asset = await getMuxAsset(params.muxAssetId);
+  if (asset.status === "preparing") {
+    return { status: "preparing" as const };
+  }
+
+  if (asset.status === "errored") {
+    const uploadError =
+      asset.errors?.messages?.find((message) => message.length > 0) ??
+      "Mux failed to process this asset.";
+    const updated = await ctx.runMutation(
+      internal.videos.markMuxAssetAsFailed,
+      {
+        videoId: params.videoId,
+        muxAssetId: params.muxAssetId,
+        uploadError,
+      },
+    );
+    return {
+      status: updated ? "errored" as const : "skipped" as const,
+    };
+  }
+
+  let playbackId = asset.playback_ids?.find(
+    (entry) => entry.policy === "public" && entry.id,
+  )?.id;
+  if (!playbackId) {
+    const created = await createPublicPlaybackId(params.muxAssetId);
+    playbackId = created.id;
+  }
+  if (!playbackId) {
+    throw new Error("Mux asset is ready but has no public playback ID.");
+  }
+
+  const updated = await ctx.runMutation(internal.videos.markAsReady, {
+    videoId: params.videoId,
+    muxAssetId: params.muxAssetId,
+    muxPlaybackId: playbackId,
+    duration: asset.duration,
+    thumbnailUrl: buildMuxThumbnailUrl(playbackId),
+  });
+  return {
+    status: updated ? "ready" as const : "skipped" as const,
+  };
 }
 
 const uploadedPartValidator = v.object({
@@ -902,6 +968,79 @@ export const sweepStaleUploads = internalAction({
     }
 
     return { reclaimed };
+  },
+});
+
+const muxAssetCheckResultValidator = v.object({
+  status: v.union(
+    v.literal("preparing"),
+    v.literal("ready"),
+    v.literal("errored"),
+    v.literal("skipped"),
+  ),
+});
+
+type MuxAssetCheckResult = {
+  status: "preparing" | "ready" | "errored" | "skipped";
+};
+
+export const checkMuxAssetStatus = action({
+  args: {
+    videoId: v.id("videos"),
+  },
+  returns: muxAssetCheckResultValidator,
+  handler: async (ctx, args): Promise<MuxAssetCheckResult> => {
+    const video = await ctx.runQuery(api.videos.getVideoForPlayback, {
+      videoId: args.videoId,
+    });
+    if (
+      !video ||
+      video.status !== "processing" ||
+      !video.muxAssetId
+    ) {
+      return { status: "skipped" as const };
+    }
+
+    return await reconcileMuxAssetStatus(ctx, {
+      videoId: args.videoId,
+      muxAssetId: video.muxAssetId,
+    });
+  },
+});
+
+export const sweepMuxAssetStatuses = internalAction({
+  args: {},
+  returns: v.object({
+    checked: v.number(),
+    reconciled: v.number(),
+  }),
+  handler: async (ctx) => {
+    const candidates = await ctx.runQuery(
+      internal.videos.listMuxProcessingCandidates,
+      {
+        limit: MUX_STATUS_SWEEP_BATCH_SIZE,
+      },
+    );
+    let checked = 0;
+    let reconciled = 0;
+
+    for (const candidate of candidates) {
+      try {
+        const result = await reconcileMuxAssetStatus(ctx, candidate);
+        checked += 1;
+        if (result.status === "ready" || result.status === "errored") {
+          reconciled += 1;
+        }
+      } catch (error) {
+        console.error("Failed to reconcile Mux asset status", {
+          videoId: candidate.videoId,
+          muxAssetId: candidate.muxAssetId,
+          error,
+        });
+      }
+    }
+
+    return { checked, reconciled };
   },
 });
 

@@ -9,4 +9,10 @@ crons.interval(
   internal.videoActions.sweepStaleUploads,
 );
 
+crons.interval(
+  "reconcile processing Mux assets",
+  { minutes: 1 },
+  internal.videoActions.sweepMuxAssetStatuses,
+);
+
 export default crons;

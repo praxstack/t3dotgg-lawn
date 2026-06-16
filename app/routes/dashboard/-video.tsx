@@ -63,6 +63,7 @@ export default function VideoPage() {
   });
   const updateVideo = useMutation(api.videos.update);
   const updateVideoWorkflowStatus = useMutation(api.videos.updateWorkflowStatus);
+  const checkMuxAssetStatus = useAction(api.videoActions.checkMuxAssetStatus);
   const getPlaybackSession = useAction(api.videoActions.getPlaybackSession);
   const getOriginalPlaybackUrl = useAction(api.videoActions.getOriginalPlaybackUrl);
   const getDownloadUrl = useAction(api.videoActions.getDownloadUrl);
@@ -115,6 +116,45 @@ export default function VideoPage() {
       navigate({ to: context.canonicalPath, replace: true });
     }
   }, [shouldCanonicalize, context, navigate]);
+
+  useEffect(() => {
+    if (
+      !resolvedVideoId ||
+      video?.status !== "processing" ||
+      !video.muxAssetId
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    let timeoutId: number | undefined;
+
+    const pollMuxStatus = async () => {
+      try {
+        await checkMuxAssetStatus({ videoId: resolvedVideoId });
+      } catch (error) {
+        console.warn("Failed to check Mux asset status", error);
+      }
+
+      if (!cancelled) {
+        timeoutId = window.setTimeout(pollMuxStatus, 10_000);
+      }
+    };
+
+    void pollMuxStatus();
+
+    return () => {
+      cancelled = true;
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [
+    checkMuxAssetStatus,
+    resolvedVideoId,
+    video?.muxAssetId,
+    video?.status,
+  ]);
 
   useEffect(() => {
     if (!resolvedVideoId || !isPlayable) {

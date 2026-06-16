@@ -458,6 +458,15 @@ export const markAsReady = internalMutation({
     thumbnailUrl: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const video = await ctx.db.get(args.videoId);
+    if (
+      !video ||
+      video.status !== "processing" ||
+      video.muxAssetId !== args.muxAssetId
+    ) {
+      return false;
+    }
+
     await ctx.db.patch(args.videoId, {
       muxAssetId: args.muxAssetId,
       muxPlaybackId: args.muxPlaybackId,
@@ -471,6 +480,33 @@ export const markAsReady = internalMutation({
       s3MultipartPartCount: undefined,
       uploadUpdatedAt: Date.now(),
     });
+    return true;
+  },
+});
+
+export const markMuxAssetAsFailed = internalMutation({
+  args: {
+    videoId: v.id("videos"),
+    muxAssetId: v.string(),
+    uploadError: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const video = await ctx.db.get(args.videoId);
+    if (
+      !video ||
+      video.status !== "processing" ||
+      video.muxAssetId !== args.muxAssetId
+    ) {
+      return false;
+    }
+
+    await ctx.db.patch(args.videoId, {
+      muxAssetStatus: "errored",
+      uploadError: args.uploadError,
+      status: "failed",
+      uploadUpdatedAt: Date.now(),
+    });
+    return true;
   },
 });
 
@@ -676,6 +712,49 @@ export const getVideoByMuxAssetId = internalQuery({
 
     if (!video) return null;
     return { videoId: video._id };
+  },
+});
+
+export const getMuxProcessingState = internalQuery({
+  args: {
+    videoId: v.id("videos"),
+  },
+  handler: async (ctx, args) => {
+    const video = await ctx.db.get(args.videoId);
+    if (
+      !video ||
+      video.status !== "processing" ||
+      !video.muxAssetId
+    ) {
+      return null;
+    }
+
+    return {
+      muxAssetId: video.muxAssetId,
+    };
+  },
+});
+
+export const listMuxProcessingCandidates = internalQuery({
+  args: {
+    limit: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const videos = await ctx.db
+      .query("videos")
+      .withIndex("by_status_and_upload_updated_at", (q) =>
+        q.eq("status", "processing"),
+      )
+      .take(args.limit);
+
+    return videos.flatMap((video) =>
+      video.muxAssetId
+        ? [{
+            videoId: video._id,
+            muxAssetId: video.muxAssetId,
+          }]
+        : [],
+    );
   },
 });
 
