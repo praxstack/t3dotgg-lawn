@@ -32,6 +32,30 @@ const teamRoleValidator = v.union(
   v.literal("viewer"),
 );
 
+function getSubscriptionSyncData(subscription: Stripe.Subscription) {
+  const item = subscription.items.data[0];
+  const stripeCustomerId =
+    typeof subscription.customer === "string"
+      ? subscription.customer
+      : subscription.customer.id;
+
+  if (!item) {
+    throw new Error("Subscription has no items.");
+  }
+
+  return {
+    stripeSubscriptionId: subscription.id,
+    stripeCustomerId,
+    status: subscription.status,
+    currentPeriodEnd: item.current_period_end,
+    cancelAtPeriodEnd: subscription.cancel_at_period_end,
+    cancelAt: subscription.cancel_at ?? undefined,
+    quantity: item.quantity ?? 1,
+    priceId: item.price.id,
+    metadata: subscription.metadata,
+  };
+}
+
 export const createSubscriptionCheckout = action({
   args: {
     teamId: v.id("teams"),
@@ -126,6 +150,78 @@ export const createSubscriptionCheckout = action({
       sessionId: session.id,
       url: session.url,
     };
+  },
+});
+
+export const reconcileTeamSubscription = action({
+  args: {
+    teamId: v.id("teams"),
+  },
+  returns: v.object({
+    status: v.union(v.literal("synced"), v.literal("no_customer"), v.literal("not_found")),
+  }),
+  handler: async (ctx, args) => {
+    const team = await ctx.runQuery(api.teams.get, { teamId: args.teamId });
+
+    if (!team) {
+      throw new Error("Team not found");
+    }
+
+    if (team.role !== "owner") {
+      throw new Error("Only team owners can manage billing.");
+    }
+
+    if (!team.stripeCustomerId) {
+      return { status: "no_customer" as const };
+    }
+
+    const subscriptions = await stripe.subscriptions.list({
+      customer: team.stripeCustomerId,
+      status: "all",
+      limit: 100,
+    });
+    const teamSubscriptions = subscriptions.data.filter(
+      (subscription) => subscription.metadata.orgId === team._id,
+    );
+    const subscription =
+      teamSubscriptions.find((candidate) =>
+        hasActiveTeamSubscriptionStatus(candidate.status),
+      ) ?? teamSubscriptions[0];
+
+    if (!subscription) {
+      return { status: "not_found" as const };
+    }
+
+    const syncData = getSubscriptionSyncData(subscription);
+    const existingSubscription = await ctx.runQuery(
+      components.stripe.public.getSubscription,
+      { stripeSubscriptionId: subscription.id },
+    );
+
+    if (existingSubscription) {
+      await ctx.runMutation(components.stripe.private.handleSubscriptionUpdated, {
+        stripeSubscriptionId: syncData.stripeSubscriptionId,
+        status: syncData.status,
+        currentPeriodEnd: syncData.currentPeriodEnd,
+        cancelAtPeriodEnd: syncData.cancelAtPeriodEnd,
+        cancelAt: syncData.cancelAt,
+        quantity: syncData.quantity,
+        priceId: syncData.priceId,
+        metadata: syncData.metadata,
+      });
+    } else {
+      await ctx.runMutation(components.stripe.private.handleSubscriptionCreated, syncData);
+    }
+
+    await ctx.runMutation(internal.billing.syncTeamSubscriptionFromWebhook, {
+      orgId: team._id,
+      stripeCustomerId: syncData.stripeCustomerId,
+      stripeSubscriptionId: syncData.stripeSubscriptionId,
+      stripePriceId: syncData.priceId,
+      status: syncData.status,
+    });
+
+    return { status: "synced" as const };
   },
 });
 
@@ -248,29 +344,25 @@ export const updateTeamSubscriptionPlan = action({
       },
     );
 
-    const updatedItem = updatedSubscription.items.data[0];
-    const updatedPriceId = updatedItem?.price?.id ?? stripePriceId;
+    const syncData = getSubscriptionSyncData(updatedSubscription);
 
     await ctx.runMutation(components.stripe.private.handleSubscriptionUpdated, {
-      stripeSubscriptionId: updatedSubscription.id,
-      status: updatedSubscription.status,
-      currentPeriodEnd: updatedItem?.current_period_end ?? 0,
-      cancelAtPeriodEnd: updatedSubscription.cancel_at_period_end ?? false,
-      cancelAt: updatedSubscription.cancel_at ?? undefined,
-      quantity: updatedItem?.quantity ?? 1,
-      priceId: updatedPriceId,
-      metadata: updatedSubscription.metadata ?? {},
+      stripeSubscriptionId: syncData.stripeSubscriptionId,
+      status: syncData.status,
+      currentPeriodEnd: syncData.currentPeriodEnd,
+      cancelAtPeriodEnd: syncData.cancelAtPeriodEnd,
+      cancelAt: syncData.cancelAt,
+      quantity: syncData.quantity,
+      priceId: syncData.priceId,
+      metadata: syncData.metadata,
     });
 
     await ctx.runMutation(internal.billing.syncTeamSubscriptionFromWebhook, {
       orgId: team._id,
-      stripeCustomerId:
-        typeof updatedSubscription.customer === "string"
-          ? updatedSubscription.customer
-          : undefined,
-      stripeSubscriptionId: updatedSubscription.id,
-      stripePriceId: updatedPriceId,
-      status: updatedSubscription.status,
+      stripeCustomerId: syncData.stripeCustomerId,
+      stripeSubscriptionId: syncData.stripeSubscriptionId,
+      stripePriceId: syncData.priceId,
+      status: syncData.status,
     });
 
     return {
