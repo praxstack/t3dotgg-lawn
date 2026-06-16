@@ -1,4 +1,4 @@
-import { useAction, useMutation } from "convex/react";
+import { useAction, useConvex, useMutation } from "convex/react";
 import { useCallback, useState } from "react";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
@@ -38,6 +38,7 @@ function createUploadId() {
 }
 
 export function useVideoUploadManager() {
+  const convex = useConvex();
   const createVideo = useMutation(api.videos.create);
   const initiateVideoUpload = useAction(api.videoActions.initiateVideoUpload);
   const signUploadParts = useAction(api.videoActions.signUploadParts);
@@ -56,13 +57,17 @@ export function useVideoUploadManager() {
 
   const uploadFilesToProject = useCallback(
     async (projectId: Id<"projects">, files: File[]) => {
+      const capabilities = await convex.query(
+        api.projects.getUploadCapabilities,
+        { projectId },
+      );
+
       for (const file of files) {
         const uploadId = createUploadId();
         const title = file.name.replace(/\.[^/.]+$/, "");
         const abortController = new AbortController();
-        const fingerprint = await buildFileFingerprint(file);
 
-        if (isFileTooLarge(file.size)) {
+        if (isFileTooLarge(file.size, capabilities.maxFileSizeBytes)) {
           setUploads((prev) => [
             ...prev,
             {
@@ -71,13 +76,14 @@ export function useVideoUploadManager() {
               file,
               progress: 0,
               status: "error",
-              error: `Video file is too large. Maximum size is ${formatMaxUploadSize()}.`,
+              error: `Video file is too large. Maximum size is ${formatMaxUploadSize(capabilities.maxFileSizeBytes)}.`,
               abortController,
             },
           ]);
           continue;
         }
 
+        const fingerprint = await buildFileFingerprint(file);
         const existingResume = await findUploadResumeSessionByFingerprint(
           fingerprint,
           projectId,
@@ -133,6 +139,7 @@ export function useVideoUploadManager() {
               signal: abortController.signal,
               resumeSession,
               fileFingerprint: fingerprint,
+              maxFileSizeBytes: capabilities.maxFileSizeBytes,
               onResumingChange: (resuming) => {
                 setUploads((prev) =>
                   prev.map((upload) =>
@@ -221,6 +228,7 @@ export function useVideoUploadManager() {
     },
     [
       createVideo,
+      convex,
       initiateVideoUpload,
       signUploadParts,
       completeMultipartUpload,

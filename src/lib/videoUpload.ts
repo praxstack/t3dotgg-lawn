@@ -629,9 +629,12 @@ export async function uploadVideoFile(args: {
   resumeSession?: MultipartUploadResumeSession;
   onResumingChange?: (resuming: boolean) => void;
   fileFingerprint?: string;
+  maxFileSizeBytes?: number;
 }) {
-  if (isFileTooLarge(args.file.size)) {
-    throw new Error(`Video file is too large. Maximum size is ${formatMaxUploadSize()}.`);
+  if (isFileTooLarge(args.file.size, args.maxFileSizeBytes)) {
+    throw new Error(
+      `Video file is too large. Maximum size is ${formatMaxUploadSize(args.maxFileSizeBytes)}.`,
+    );
   }
 
   const contentType = args.file.type || "video/mp4";
