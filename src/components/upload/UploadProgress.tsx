@@ -29,6 +29,7 @@ interface UploadProgressProps {
   estimatedSecondsRemaining?: number | null;
   resuming?: boolean;
   onCancel?: () => void;
+  onRetryProcessing?: () => void;
 }
 
 export function UploadProgress({
@@ -41,6 +42,7 @@ export function UploadProgress({
   estimatedSecondsRemaining = null,
   resuming = false,
   onCancel,
+  onRetryProcessing,
 }: UploadProgressProps) {
   return (
     <div className="border-2 border-[#1a1a1a] p-4 bg-[#f0f0e8]">
@@ -62,7 +64,8 @@ export function UploadProgress({
           {status === "processing" && (
             <Loader2 className="h-5 w-5 text-[#2d5a2d] animate-spin" />
           )}
-          {(status === "pending" || status === "uploading") && onCancel && (
+          {(status === "pending" || status === "uploading" || status === "error") &&
+            onCancel && (
             <Button
               variant="ghost"
               size="icon"
@@ -95,7 +98,14 @@ export function UploadProgress({
       )}
 
       {status === "error" && error && (
-        <p className="text-xs text-[#dc2626] mt-2">{error}</p>
+        <div className="mt-2 space-y-2">
+          <p className="text-xs text-[#dc2626]">{error}</p>
+          {onRetryProcessing && (
+            <Button size="sm" onClick={onRetryProcessing}>
+              Retry processing
+            </Button>
+          )}
+        </div>
       )}
     </div>
   );

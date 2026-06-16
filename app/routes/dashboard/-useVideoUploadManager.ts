@@ -9,7 +9,11 @@ import {
   findUploadResumeSessionByFingerprint,
   loadUploadResumeSession,
 } from "@/lib/uploadResumeDb";
-import { isResumableUploadError, uploadVideoFile } from "@/lib/videoUpload";
+import {
+  isProcessingRetryError,
+  isResumableUploadError,
+  uploadVideoFile,
+} from "@/lib/videoUpload";
 
 export interface ManagedUploadItem {
   id: string;
@@ -23,6 +27,7 @@ export interface ManagedUploadItem {
   estimatedSecondsRemaining?: number | null;
   abortController?: AbortController;
   resuming?: boolean;
+  canRetryProcessing?: boolean;
 }
 
 function createUploadId() {
@@ -103,44 +108,68 @@ export function useVideoUploadManager() {
             });
           }
 
-          const resumeSession =
+          let resumeSession =
             (await loadUploadResumeSession(createdVideoId)) ?? existingResume;
 
-          setUploads((prev) =>
-            prev.map((upload) =>
-              upload.id === uploadId
-                ? {
-                    ...upload,
-                    videoId: createdVideoId,
-                    status: "uploading",
-                    resuming: Boolean(resumeSession),
-                  }
-                : upload,
-            ),
-          );
+          const runUpload = async () => {
+            setUploads((prev) =>
+              prev.map((upload) =>
+                upload.id === uploadId
+                  ? {
+                      ...upload,
+                      videoId: createdVideoId,
+                      status: "uploading",
+                      resuming: Boolean(resumeSession),
+                    }
+                  : upload,
+              ),
+            );
 
-          await uploadVideoFile({
-            file,
-            projectId,
-            videoId: createdVideoId,
-            actions: uploadActions,
-            signal: abortController.signal,
-            resumeSession,
-            onProgress: (update) => {
-              setUploads((prev) =>
-                prev.map((upload) =>
-                  upload.id === uploadId
-                    ? {
-                        ...upload,
-                        progress: update.progress,
-                        bytesPerSecond: update.bytesPerSecond,
-                        estimatedSecondsRemaining: update.estimatedSecondsRemaining,
-                      }
-                    : upload,
-                ),
-              );
-            },
-          });
+            await uploadVideoFile({
+              file,
+              projectId,
+              videoId: createdVideoId!,
+              actions: uploadActions,
+              signal: abortController.signal,
+              resumeSession,
+              onProgress: (update) => {
+                setUploads((prev) =>
+                  prev.map((upload) =>
+                    upload.id === uploadId
+                      ? {
+                          ...upload,
+                          progress: update.progress,
+                          bytesPerSecond: update.bytesPerSecond,
+                          estimatedSecondsRemaining: update.estimatedSecondsRemaining,
+                        }
+                      : upload,
+                  ),
+                );
+              },
+            });
+          };
+
+          try {
+            await runUpload();
+          } catch (error) {
+            const staleResumeVideo =
+              Boolean(existingResume) &&
+              error instanceof Error &&
+              error.message.includes("Video not found");
+            if (!staleResumeVideo) {
+              throw error;
+            }
+
+            await deleteUploadResumeSession(createdVideoId);
+            createdVideoId = await createVideo({
+              projectId,
+              title,
+              fileSize: file.size,
+              contentType: file.type || "video/mp4",
+            });
+            resumeSession = undefined;
+            await runUpload();
+          }
 
           setUploads((prev) =>
             prev.map((upload) =>
@@ -158,6 +187,7 @@ export function useVideoUploadManager() {
             error instanceof Error ? error.message : "Upload failed";
           const cancelled = errorMessage === "Upload cancelled";
           const resumable = isResumableUploadError(error);
+          const canRetryProcessing = isProcessingRetryError(error);
 
           setUploads((prev) =>
             prev.map((upload) =>
@@ -166,6 +196,7 @@ export function useVideoUploadManager() {
                     ...upload,
                     status: cancelled ? "pending" : "error",
                     error: cancelled ? undefined : errorMessage,
+                    canRetryProcessing,
                   }
                 : upload,
             ),
@@ -173,7 +204,8 @@ export function useVideoUploadManager() {
 
           if (cancelled) {
             setUploads((prev) => prev.filter((upload) => upload.id !== uploadId));
-          } else if (createdVideoId && !resumable) {
+          } else if (createdVideoId && !resumable && !canRetryProcessing) {
+            deleteUploadResumeSession(createdVideoId).catch(console.error);
             markUploadFailed({ videoId: createdVideoId }).catch(console.error);
           }
         }
@@ -198,16 +230,73 @@ export function useVideoUploadManager() {
       if (upload?.videoId) {
         abortVideoUpload({ videoId: upload.videoId }).catch(console.error);
         deleteUploadResumeSession(upload.videoId).catch(console.error);
-        markUploadFailed({ videoId: upload.videoId }).catch(console.error);
       }
       setUploads((prev) => prev.filter((item) => item.id !== uploadId));
     },
-    [uploads, abortVideoUpload, markUploadFailed],
+    [uploads, abortVideoUpload],
+  );
+
+  const retryProcessing = useCallback(
+    async (uploadId: string) => {
+      const upload = uploads.find((item) => item.id === uploadId);
+      if (!upload?.videoId || !upload.canRetryProcessing) return;
+
+      setUploads((prev) =>
+        prev.map((item) =>
+          item.id === uploadId
+            ? {
+                ...item,
+                status: "processing",
+                error: undefined,
+                canRetryProcessing: false,
+              }
+            : item,
+        ),
+      );
+
+      try {
+        await markUploadComplete({ videoId: upload.videoId });
+        await deleteUploadResumeSession(upload.videoId);
+        setUploads((prev) =>
+          prev.map((item) =>
+            item.id === uploadId
+              ? { ...item, status: "complete", progress: 100, resuming: false }
+              : item,
+          ),
+        );
+        setTimeout(() => {
+          setUploads((prev) => prev.filter((item) => item.id !== uploadId));
+        }, 3000);
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : "Processing failed";
+        const canRetryProcessing = errorMessage.includes(
+          "Mux ingest failed after upload.",
+        );
+        if (!canRetryProcessing) {
+          await deleteUploadResumeSession(upload.videoId);
+        }
+        setUploads((prev) =>
+          prev.map((item) =>
+            item.id === uploadId
+              ? {
+                  ...item,
+                  status: "error",
+                  error: errorMessage,
+                  canRetryProcessing,
+                }
+              : item,
+          ),
+        );
+      }
+    },
+    [uploads, markUploadComplete],
   );
 
   return {
     uploads,
     uploadFilesToProject,
     cancelUpload,
+    retryProcessing,
   };
 }

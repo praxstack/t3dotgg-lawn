@@ -43,24 +43,44 @@ function runTransaction<T>(
     (db) =>
       new Promise<T>((resolve, reject) => {
         let closed = false;
+        let settled = false;
+        let result: T;
         const closeDb = () => {
           if (closed) return;
           closed = true;
           db.close();
+        };
+        const rejectOnce = (error: Error) => {
+          if (settled) return;
+          settled = true;
+          closeDb();
+          reject(error);
         };
 
         const transaction = db.transaction(STORE_NAME, mode);
         const store = transaction.objectStore(STORE_NAME);
         const request = run(store);
         request.onerror = () => {
-          closeDb();
-          reject(request.error ?? new Error("Upload resume DB request failed"));
+          rejectOnce(request.error ?? new Error("Upload resume DB request failed"));
         };
-        request.onsuccess = () => resolve(request.result as T);
-        transaction.oncomplete = () => closeDb();
-        transaction.onerror = () => {
+        request.onsuccess = () => {
+          result = request.result as T;
+        };
+        transaction.oncomplete = () => {
+          if (settled) return;
+          settled = true;
           closeDb();
-          reject(transaction.error ?? new Error("Upload resume DB transaction failed"));
+          resolve(result);
+        };
+        transaction.onerror = () => {
+          rejectOnce(
+            transaction.error ?? new Error("Upload resume DB transaction failed"),
+          );
+        };
+        transaction.onabort = () => {
+          rejectOnce(
+            transaction.error ?? new Error("Upload resume DB transaction aborted"),
+          );
         };
       }),
   );
@@ -99,26 +119,13 @@ export async function findUploadResumeSessionByFingerprint(
   projectId: Id<"projects">,
 ) {
   try {
-    const db = await openDb();
-    return await new Promise<MultipartUploadResumeSession | undefined>((resolve, reject) => {
-      const transaction = db.transaction(STORE_NAME, "readonly");
-      const store = transaction.objectStore(STORE_NAME);
-      const index = store.index("by_fingerprint");
-      const request = index.getAll(fingerprint);
-      request.onerror = () => reject(request.error ?? new Error("Failed to query resume sessions"));
-      request.onsuccess = () => {
-        const sessions = (request.result as MultipartUploadResumeSession[] | undefined) ?? [];
-        const latest = sessions
-          .filter((session) => session.projectId === projectId)
-          .sort((a, b) => b.updatedAt - a.updatedAt)[0];
-        resolve(latest);
-        db.close();
-      };
-      transaction.onerror = () => {
-        reject(transaction.error ?? new Error("Failed to query resume sessions"));
-        db.close();
-      };
-    });
+    const sessions = await runTransaction<MultipartUploadResumeSession[]>(
+      "readonly",
+      (store) => store.index("by_fingerprint").getAll(fingerprint),
+    );
+    return sessions
+      .filter((session) => session.projectId === projectId)
+      .sort((a, b) => b.updatedAt - a.updatedAt)[0];
   } catch {
     return undefined;
   }

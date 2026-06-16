@@ -85,6 +85,9 @@ export default defineSchema({
     // Metadata
     s3Key: v.optional(v.string()),
     s3MultipartUploadId: v.optional(v.string()),
+    s3MultipartPartSizeBytes: v.optional(v.number()),
+    s3MultipartPartCount: v.optional(v.number()),
+    uploadUpdatedAt: v.optional(v.number()),
     duration: v.optional(v.number()),
     thumbnailUrl: v.optional(v.string()),
     fileSize: v.optional(v.number()),
@@ -106,7 +109,8 @@ export default defineSchema({
     .index("by_public_id", ["publicId"])
     .index("by_mux_upload_id", ["muxUploadId"])
     .index("by_mux_asset_id", ["muxAssetId"])
-    .index("by_mux_playback_id", ["muxPlaybackId"]),
+    .index("by_mux_playback_id", ["muxPlaybackId"])
+    .index("by_status_and_upload_updated_at", ["status", "uploadUpdatedAt"]),
 
   comments: defineTable({
     videoId: v.id("videos"),

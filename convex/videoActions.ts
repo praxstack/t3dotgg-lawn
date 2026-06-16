@@ -8,7 +8,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { v } from "convex/values";
-import { action, ActionCtx } from "./_generated/server";
+import { action, ActionCtx, internalAction } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
 import {
@@ -31,10 +31,10 @@ import {
 import {
   MAX_SIGN_PARTS_BATCH,
   MAX_VIDEO_FILE_SIZE_BYTES,
-  MULTIPART_PART_SIZE_BYTES,
   PRESIGN_SINGLE_PUT_EXPIRES_SEC,
   SINGLE_PUT_MAX_BYTES,
-  computePartCount,
+  STALE_UPLOAD_SWEEP_BATCH_SIZE,
+  STALE_UPLOAD_THRESHOLD_MS,
   usesMultipartUpload,
 } from "./uploadLimits";
 const ALLOWED_UPLOAD_CONTENT_TYPES = new Set([
@@ -246,6 +246,8 @@ function canResumeMultipartUpload(
     status: string;
     s3Key?: string;
     s3MultipartUploadId?: string;
+    s3MultipartPartSizeBytes?: number;
+    s3MultipartPartCount?: number;
     fileSize?: number;
   },
   fileSize: number,
@@ -256,6 +258,10 @@ function canResumeMultipartUpload(
     video.s3Key.length > 0 &&
     typeof video.s3MultipartUploadId === "string" &&
     video.s3MultipartUploadId.length > 0 &&
+    typeof video.s3MultipartPartSizeBytes === "number" &&
+    video.s3MultipartPartSizeBytes > 0 &&
+    typeof video.s3MultipartPartCount === "number" &&
+    video.s3MultipartPartCount > 0 &&
     video.fileSize === fileSize
   );
 }
@@ -380,10 +386,14 @@ export const initiateVideoUpload = action({
       contentType: args.contentType,
     });
     const video = await getVideoForUpload(ctx, args.videoId);
+    await ctx.runQuery(internal.videos.assertVideoUploadAllowed, {
+      videoId: args.videoId,
+      fileSize: args.fileSize,
+    });
 
     if (usesMultipartUpload(args.fileSize)) {
       if (
-        video.status === "uploading" &&
+        (video.status === "uploading" || video.status === "failed") &&
         video.s3Key &&
         !video.s3MultipartUploadId &&
         video.fileSize === args.fileSize
@@ -412,15 +422,24 @@ export const initiateVideoUpload = action({
           key: video.s3Key!,
           uploadId: video.s3MultipartUploadId!,
         });
-        const { partSizeBytes, partCount } = getMultipartPlan(args.fileSize);
+        await ctx.runMutation(internal.videos.touchUploadActivity, {
+          videoId: args.videoId,
+        });
         return {
           strategy: "multipart" as const,
           key: video.s3Key!,
           uploadId: video.s3MultipartUploadId!,
-          partSizeBytes,
-          partCount,
+          partSizeBytes: video.s3MultipartPartSizeBytes!,
+          partCount: video.s3MultipartPartCount!,
           uploadedParts,
         };
+      }
+
+      if (video.s3Key && video.s3MultipartUploadId) {
+        await abortMultipartUploadSession({
+          key: video.s3Key,
+          uploadId: video.s3MultipartUploadId,
+        });
       }
 
       const key = buildVideoObjectKey(args.videoId, args.filename);
@@ -436,6 +455,8 @@ export const initiateVideoUpload = action({
         fileSize: args.fileSize,
         contentType: normalizedContentType,
         s3MultipartUploadId: uploadId,
+        s3MultipartPartSizeBytes: partSizeBytes,
+        s3MultipartPartCount: partCount,
       });
 
       return {
@@ -496,13 +517,12 @@ export const signUploadParts = action({
     if (
       !video.s3Key ||
       !video.s3MultipartUploadId ||
-      typeof video.fileSize !== "number"
+      typeof video.s3MultipartPartCount !== "number"
     ) {
       throw new Error("Multipart upload has not been initiated for this video.");
     }
 
-    const partCount = computePartCount(video.fileSize, MULTIPART_PART_SIZE_BYTES);
-    validatePartNumbersOrThrow(args.partNumbers, partCount, {
+    validatePartNumbersOrThrow(args.partNumbers, video.s3MultipartPartCount, {
       maxBatchSize: MAX_SIGN_PARTS_BATCH,
     });
 
@@ -510,6 +530,9 @@ export const signUploadParts = action({
       key: video.s3Key,
       uploadId: video.s3MultipartUploadId,
       partNumbers: args.partNumbers,
+    });
+    await ctx.runMutation(internal.videos.touchUploadActivity, {
+      videoId: args.videoId,
     });
 
     return { parts };
@@ -531,12 +554,12 @@ export const completeMultipartUpload = action({
     if (
       !video.s3Key ||
       !video.s3MultipartUploadId ||
-      typeof video.fileSize !== "number"
+      typeof video.s3MultipartPartCount !== "number"
     ) {
       throw new Error("Multipart upload has not been initiated for this video.");
     }
 
-    const partCount = computePartCount(video.fileSize, MULTIPART_PART_SIZE_BYTES);
+    const partCount = video.s3MultipartPartCount;
     if (args.parts.length !== partCount) {
       throw new Error("Multipart upload is missing one or more parts.");
     }
@@ -555,13 +578,15 @@ export const completeMultipartUpload = action({
       throw new Error("Multipart upload parts are incomplete.");
     }
 
-    await completeMultipartUploadSession({
-      key: video.s3Key,
-      uploadId: video.s3MultipartUploadId,
-      parts: normalizedParts,
-    });
-
+    let completed = false;
     try {
+      await completeMultipartUploadSession({
+        key: video.s3Key,
+        uploadId: video.s3MultipartUploadId,
+        parts: normalizedParts,
+      });
+      completed = true;
+
       const s3 = getS3Client();
       const head = await s3.send(
         new HeadObjectCommand({
@@ -599,9 +624,16 @@ export const completeMultipartUpload = action({
       });
     } catch (error) {
       try {
-        await deleteUploadedObject(video.s3Key);
+        if (completed) {
+          await deleteUploadedObject(video.s3Key);
+        } else {
+          await abortMultipartUploadSession({
+            key: video.s3Key,
+            uploadId: video.s3MultipartUploadId,
+          });
+        }
       } catch {
-        // Preserve the original validation or reconciliation failure.
+        // Preserve the original completion, validation, or reconciliation failure.
       }
 
       await ctx.runMutation(internal.videos.markAsFailed, {
@@ -634,10 +666,16 @@ export const abortVideoUpload = action({
         key: video.s3Key,
         uploadId: video.s3MultipartUploadId,
       });
+    } else if (video.s3Key) {
+      await deleteUploadedObject(video.s3Key);
     }
 
-    await ctx.runMutation(internal.videos.clearMultipartUploadId, {
+    await ctx.runMutation(internal.videos.clearUploadStorageInfo, {
       videoId: args.videoId,
+    });
+    await ctx.runMutation(internal.videos.markAsFailed, {
+      videoId: args.videoId,
+      uploadError: "Upload cancelled.",
     });
 
     return { success: true };
@@ -663,6 +701,10 @@ export const getUploadUrl = action({
       contentType: args.contentType,
     });
     validateSinglePutSizeOrThrow(args.fileSize);
+    await ctx.runQuery(internal.videos.assertVideoUploadAllowed, {
+      videoId: args.videoId,
+      fileSize: args.fileSize,
+    });
 
     const s3 = getS3Client();
     const key = buildVideoObjectKey(args.videoId, args.filename);
@@ -702,6 +744,9 @@ export const markUploadComplete = action({
 
     if (!video || !video.s3Key) {
       throw new Error("Original bucket file not found for this video");
+    }
+    if (video.status !== "uploading" && video.status !== "failed") {
+      throw new Error("Video is not waiting for upload processing.");
     }
 
     try {
@@ -770,7 +815,12 @@ export const markUploadComplete = action({
         videoId: args.videoId,
         uploadError,
       });
-      throw error;
+      if (shouldDeleteObject) {
+        throw error;
+      }
+      throw new Error(
+        "Mux ingest failed after upload. Retry processing without re-uploading.",
+      );
     }
 
     return { success: true };
@@ -786,6 +836,19 @@ export const markUploadFailed = action({
   }),
   handler: async (ctx, args) => {
     await requireVideoMemberAccess(ctx, args.videoId);
+    const video = await getVideoForUpload(ctx, args.videoId);
+
+    if (video.s3Key && video.s3MultipartUploadId) {
+      await abortMultipartUploadSession({
+        key: video.s3Key,
+        uploadId: video.s3MultipartUploadId,
+      });
+    } else if (video.s3Key) {
+      await deleteUploadedObject(video.s3Key);
+    }
+    await ctx.runMutation(internal.videos.clearUploadStorageInfo, {
+      videoId: args.videoId,
+    });
 
     await ctx.runMutation(internal.videos.markAsFailed, {
       videoId: args.videoId,
@@ -793,6 +856,52 @@ export const markUploadFailed = action({
     });
 
     return { success: true };
+  },
+});
+
+export const sweepStaleUploads = internalAction({
+  args: {},
+  returns: v.object({
+    reclaimed: v.number(),
+  }),
+  handler: async (ctx) => {
+    const cutoff = Date.now() - STALE_UPLOAD_THRESHOLD_MS;
+    const candidates = await ctx.runQuery(
+      internal.videos.listStaleUploadCandidates,
+      {
+        cutoff,
+        limit: STALE_UPLOAD_SWEEP_BATCH_SIZE,
+      },
+    );
+    let reclaimed = 0;
+
+    for (const candidate of candidates) {
+      const claimed = await ctx.runMutation(internal.videos.claimStaleUpload, {
+        videoId: candidate.videoId,
+        cutoff,
+      });
+      if (!claimed) continue;
+
+      try {
+        if (claimed.key && claimed.uploadId) {
+          await abortMultipartUploadSession({
+            key: claimed.key,
+            uploadId: claimed.uploadId,
+          });
+        } else if (claimed.key) {
+          await deleteUploadedObject(claimed.key);
+        }
+
+        await ctx.runMutation(internal.videos.clearUploadStorageInfo, {
+          videoId: candidate.videoId,
+        });
+        reclaimed += 1;
+      } catch (error) {
+        console.error("Failed to reclaim stale upload", candidate.videoId, error);
+      }
+    }
+
+    return { reclaimed };
   },
 });
 

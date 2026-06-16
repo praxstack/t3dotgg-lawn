@@ -15,6 +15,7 @@ export type DashboardUploadContextValue = {
     estimatedSecondsRemaining?: number | null;
   }[];
   cancelUpload: (uploadId: string) => void;
+  retryProcessing: (uploadId: string) => void;
 };
 
 const DashboardUploadContext = createContext<DashboardUploadContextValue | null>(null);

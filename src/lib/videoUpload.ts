@@ -26,8 +26,20 @@ export class ResumableUploadError extends Error {
   }
 }
 
+export class ProcessingRetryError extends Error {
+  constructor(error: unknown) {
+    const message = error instanceof Error ? error.message : "Processing failed";
+    super(message);
+    this.name = "ProcessingRetryError";
+  }
+}
+
 export function isResumableUploadError(error: unknown) {
   return error instanceof ResumableUploadError;
+}
+
+export function isProcessingRetryError(error: unknown) {
+  return error instanceof ProcessingRetryError;
 }
 
 type UploadedPart = { partNumber: number; etag: string };
@@ -83,13 +95,24 @@ function uploadPartWithXhr(
   url: string,
   blob: Blob,
   signal: AbortSignal,
+  onProgress: (loaded: number) => void,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
+    let settled = false;
 
+    const cleanup = () => {
+      signal.removeEventListener("abort", onAbort);
+    };
+    const rejectOnce = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
     const onAbort = () => {
       xhr.abort();
-      reject(new Error("Upload cancelled"));
+      rejectOnce(new Error("Upload cancelled"));
     };
 
     if (signal.aborted) {
@@ -98,28 +121,33 @@ function uploadPartWithXhr(
     }
     signal.addEventListener("abort", onAbort, { once: true });
 
+    xhr.upload.addEventListener("progress", (event) => {
+      if (!event.lengthComputable || settled) return;
+      onProgress(event.loaded);
+    });
+
     xhr.addEventListener("load", () => {
-      signal.removeEventListener("abort", onAbort);
+      if (settled) return;
       if (xhr.status >= 200 && xhr.status < 300) {
         const etag = xhr.getResponseHeader("ETag");
         if (!etag) {
-          reject(new Error("Upload part succeeded but no ETag was returned."));
+          rejectOnce(new Error("Upload part succeeded but no ETag was returned."));
           return;
         }
+        settled = true;
+        cleanup();
         resolve(normalizeEtag(etag));
         return;
       }
-      reject(new Error(`Upload part failed: ${xhr.status} ${xhr.statusText}`));
+      rejectOnce(new Error(`Upload part failed: ${xhr.status} ${xhr.statusText}`));
     });
 
     xhr.addEventListener("error", () => {
-      signal.removeEventListener("abort", onAbort);
-      reject(new Error("Upload part failed: Network error"));
+      rejectOnce(new Error("Upload part failed: Network error"));
     });
 
     xhr.addEventListener("abort", () => {
-      signal.removeEventListener("abort", onAbort);
-      reject(new Error("Upload cancelled"));
+      rejectOnce(new Error("Upload cancelled"));
     });
 
     xhr.open("PUT", url);
@@ -240,17 +268,47 @@ function getPartByteRange(
 async function runWithConcurrency<T>(
   items: T[],
   concurrency: number,
-  worker: (item: T) => Promise<void>,
+  signal: AbortSignal,
+  worker: (item: T, signal: AbortSignal) => Promise<void>,
 ) {
   let index = 0;
+  let firstError: unknown;
+  let hasError = false;
+  const workerController = new AbortController();
+  const abortWorkers = () => {
+    workerController.abort(signal.reason);
+  };
+  if (signal.aborted) {
+    abortWorkers();
+  } else {
+    signal.addEventListener("abort", abortWorkers, { once: true });
+  }
+
   const runners = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
-    while (index < items.length) {
+    while (!workerController.signal.aborted && index < items.length) {
       const current = items[index];
       index += 1;
-      await worker(current);
+      try {
+        await worker(current, workerController.signal);
+      } catch (error) {
+        if (!hasError) {
+          hasError = true;
+          firstError = error;
+          workerController.abort(error);
+        }
+        return;
+      }
     }
   });
   await Promise.all(runners);
+  signal.removeEventListener("abort", abortWorkers);
+
+  if (hasError) {
+    throw firstError;
+  }
+  if (signal.aborted) {
+    throw new Error("Upload cancelled");
+  }
 }
 
 async function persistResumeSession(session: MultipartUploadResumeSession) {
@@ -297,25 +355,36 @@ async function uploadMultipartFile(args: {
 
   let lastTime = Date.now();
   let lastLoaded = bytesUploaded;
+  let lastReportedAt = 0;
+  let uploadActive = true;
   const recentSpeeds: number[] = [];
+  const inFlightLoaded = new Map<number, number>();
 
-  const reportProgress = () => {
-    const percentage = Math.min(100, Math.round((bytesUploaded / file.size) * 100));
+  const reportProgress = (force = false) => {
     const now = Date.now();
+    if (!force && now - lastReportedAt < 100) return;
+    lastReportedAt = now;
+
+    const inFlightBytes = [...inFlightLoaded.values()].reduce(
+      (sum, loaded) => sum + loaded,
+      0,
+    );
+    const totalLoaded = Math.min(file.size, bytesUploaded + inFlightBytes);
+    const percentage = Math.min(100, Math.round((totalLoaded / file.size) * 100));
     const timeDelta = (now - lastTime) / 1000;
-    const bytesDelta = bytesUploaded - lastLoaded;
+    const bytesDelta = totalLoaded - lastLoaded;
     if (timeDelta > 0.1) {
-      const speed = bytesDelta / timeDelta;
+      const speed = Math.max(0, bytesDelta / timeDelta);
       recentSpeeds.push(speed);
       if (recentSpeeds.length > 5) recentSpeeds.shift();
       lastTime = now;
-      lastLoaded = bytesUploaded;
+      lastLoaded = totalLoaded;
     }
     const avgSpeed =
       recentSpeeds.length > 0
         ? recentSpeeds.reduce((sum, speed) => sum + speed, 0) / recentSpeeds.length
         : 0;
-    const remaining = file.size - bytesUploaded;
+    const remaining = file.size - totalLoaded;
     const eta = avgSpeed > 0 ? Math.ceil(remaining / avgSpeed) : null;
     onProgress({
       progress: percentage,
@@ -324,7 +393,7 @@ async function uploadMultipartFile(args: {
     });
   };
 
-  reportProgress();
+  reportProgress(true);
 
   const resumeBase: MultipartUploadResumeSession = {
     videoId,
@@ -354,31 +423,58 @@ async function uploadMultipartFile(args: {
         partNumbers: signBatch,
       });
 
-      await runWithConcurrency(signedParts, MULTIPART_UPLOAD_CONCURRENCY, async (signedPart) => {
-        const { start, end } = getPartByteRange(
-          file.size,
-          initiate.partSizeBytes,
-          signedPart.partNumber,
-        );
-        const blob = file.slice(start, end);
-        const etag = await uploadPartWithXhr(signedPart.url, blob, signal);
-        completedMap.set(signedPart.partNumber, etag);
-        bytesUploaded += end - start;
-        reportProgress();
+      await runWithConcurrency(
+        signedParts,
+        MULTIPART_UPLOAD_CONCURRENCY,
+        signal,
+        async (signedPart, workerSignal) => {
+          const { start, end } = getPartByteRange(
+            file.size,
+            initiate.partSizeBytes,
+            signedPart.partNumber,
+          );
+          const blob = file.slice(start, end);
+          const etag = await uploadPartWithXhr(
+            signedPart.url,
+            blob,
+            workerSignal,
+            (loaded) => {
+              if (!uploadActive || workerSignal.aborted) return;
+              inFlightLoaded.set(signedPart.partNumber, Math.min(loaded, blob.size));
+              reportProgress();
+            },
+          );
+          if (!uploadActive || workerSignal.aborted) {
+            throw new Error("Upload cancelled");
+          }
 
-        await persistResumeSession({
-          ...resumeBase,
-          completedParts: mergeUploadedParts(
-            [...completedMap.entries()].map(([partNumber, partEtag]) => ({
-              partNumber,
-              etag: partEtag,
-            })),
-          ),
-          updatedAt: Date.now(),
-        });
-      });
+          inFlightLoaded.delete(signedPart.partNumber);
+          completedMap.set(signedPart.partNumber, etag);
+          bytesUploaded += end - start;
+          reportProgress(true);
+
+          if (!uploadActive || workerSignal.aborted) {
+            throw new Error("Upload cancelled");
+          }
+          await persistResumeSession({
+            ...resumeBase,
+            completedParts: mergeUploadedParts(
+              [...completedMap.entries()].map(([partNumber, partEtag]) => ({
+                partNumber,
+                etag: partEtag,
+              })),
+            ),
+            updatedAt: Date.now(),
+          });
+        },
+      );
     }
   } catch (error) {
+    uploadActive = false;
+    inFlightLoaded.clear();
+    if (error instanceof Error && error.message === "Upload cancelled") {
+      throw error;
+    }
     throw new ResumableUploadError(error);
   }
 
@@ -394,7 +490,6 @@ async function uploadMultipartFile(args: {
   }
 
   await actions.completeMultipartUpload({ videoId, parts: allParts });
-  await deleteUploadResumeSession(videoId);
 }
 
 export async function uploadVideoFile(args: {
@@ -422,7 +517,6 @@ export async function uploadVideoFile(args: {
     await uploadSingleWithXhr(initiate.url, args.file, contentType, args.signal, args.onProgress);
   } else if (initiate.strategy === "already_uploaded") {
     args.onProgress({ progress: 100, bytesPerSecond: 0, estimatedSecondsRemaining: 0 });
-    await deleteUploadResumeSession(args.videoId);
   } else {
     await uploadMultipartFile({
       file: args.file,
@@ -436,5 +530,16 @@ export async function uploadVideoFile(args: {
     });
   }
 
-  await args.actions.markUploadComplete({ videoId: args.videoId });
+  try {
+    await args.actions.markUploadComplete({ videoId: args.videoId });
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message.includes("Mux ingest failed after upload.")
+    ) {
+      throw new ProcessingRetryError(error);
+    }
+    throw error;
+  }
+  await deleteUploadResumeSession(args.videoId);
 }
