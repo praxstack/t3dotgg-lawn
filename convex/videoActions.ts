@@ -690,9 +690,9 @@ export const completeMultipartUpload = action({
       });
     } catch (error) {
       try {
-        if (completed) {
+        if (completed && shouldDeleteUploadedObjectOnFailure(error)) {
           await deleteUploadedObject(video.s3Key);
-        } else {
+        } else if (!completed) {
           await abortMultipartUploadSession({
             key: video.s3Key,
             uploadId: video.s3MultipartUploadId,
