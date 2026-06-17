@@ -10,38 +10,45 @@ const CLOSING_DELIMITERS = {
   "}": "{",
 } as const;
 
-function countCharacter(value: string, character: string) {
-  let count = 0;
+function splitTrailingPunctuation(candidate: string) {
+  // Count how many of each opening/closing delimiter the whole candidate
+  // contains up front, so trimming runs in O(n) instead of re-scanning the
+  // remaining string on every iteration (which is O(n^2) and lets a comment
+  // with many unbalanced delimiters hang the renderer).
+  const closingCounts = new Map<string, number>();
+  const openingCounts = new Map<string, number>();
 
-  for (const currentCharacter of value) {
-    if (currentCharacter === character) {
-      count += 1;
+  for (const character of candidate) {
+    if (character in CLOSING_DELIMITERS) {
+      closingCounts.set(character, (closingCounts.get(character) ?? 0) + 1);
+    } else {
+      for (const closing of Object.keys(CLOSING_DELIMITERS)) {
+        if (
+          character ===
+          CLOSING_DELIMITERS[closing as keyof typeof CLOSING_DELIMITERS]
+        ) {
+          openingCounts.set(closing, (openingCounts.get(closing) ?? 0) + 1);
+        }
+      }
     }
   }
 
-  return count;
-}
+  let end = candidate.length;
 
-function splitTrailingPunctuation(candidate: string) {
-  let link = candidate;
-
-  while (link.length > 0) {
-    const lastCharacter = link.at(-1);
-    if (!lastCharacter) break;
+  while (end > 0) {
+    const lastCharacter = candidate[end - 1];
 
     if (TRAILING_PUNCTUATION.has(lastCharacter)) {
-      link = link.slice(0, -1);
+      end -= 1;
       continue;
     }
 
     if (lastCharacter in CLOSING_DELIMITERS) {
-      const openingDelimiter =
-        CLOSING_DELIMITERS[lastCharacter as keyof typeof CLOSING_DELIMITERS];
-      if (
-        countCharacter(link, lastCharacter) >
-        countCharacter(link, openingDelimiter)
-      ) {
-        link = link.slice(0, -1);
+      const closing = closingCounts.get(lastCharacter) ?? 0;
+      const opening = openingCounts.get(lastCharacter) ?? 0;
+      if (closing > opening) {
+        closingCounts.set(lastCharacter, closing - 1);
+        end -= 1;
         continue;
       }
     }
@@ -50,8 +57,8 @@ function splitTrailingPunctuation(candidate: string) {
   }
 
   return {
-    link,
-    trailingText: candidate.slice(link.length),
+    link: candidate.slice(0, end),
+    trailingText: candidate.slice(end),
   };
 }
 

@@ -74,3 +74,32 @@ test("does not link unsupported or malformed URLs", () => {
 
   assert.deepEqual(parts, [{ type: "text", value: text }]);
 });
+
+test("never linkifies javascript, data, or vbscript URLs", () => {
+  for (const text of [
+    "javascript:alert(1)",
+    "data:text/html,<script>alert(1)</script>",
+    "vbscript:msgbox(1)",
+  ]) {
+    const parts = parseCommentLinks(text);
+    assert.equal(
+      parts.some((part) => part.type === "link"),
+      false,
+    );
+  }
+});
+
+test("trims unbalanced trailing delimiters in linear time", () => {
+  const text = `http://example.com${")".repeat(50000)}`;
+  const start = Date.now();
+  const parts = parseCommentLinks(text);
+  const elapsed = Date.now() - start;
+
+  assert.deepEqual(parts, [
+    { type: "link", value: "http://example.com", href: "http://example.com" },
+    { type: "text", value: ")".repeat(50000) },
+  ]);
+  // Quadratic trimming would take seconds for this input; linear stays tiny.
+  assert.ok(elapsed < 1000, `parsing took ${elapsed}ms`);
+  assert.equal(reconstructComment(parts), text);
+});
