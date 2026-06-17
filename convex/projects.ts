@@ -10,7 +10,7 @@ import { internal } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
 import { getUser, requireTeamAccess, requireProjectAccess } from "./auth";
 import { assertTeamHasActiveSubscription } from "./billingHelpers";
-import { deleteVideoAndDependents } from "./videos";
+import { deleteVideoAndDependentsBatch } from "./videos";
 
 // Maximum folder nesting. depth(root) == 0; a folder may be created/moved under
 // a parent only when parentDepth + 1 <= MAX_FOLDER_DEPTH, so the deepest folder
@@ -21,10 +21,15 @@ export const MAX_FOLDER_DEPTH = 8;
 // loop forever. A valid chain is at most MAX_FOLDER_DEPTH + 1 nodes long.
 const ANCESTOR_WALK_LIMIT = MAX_FOLDER_DEPTH + 2;
 
-// Documents deleted per subtree-delete batch. Kept well under Convex's
-// per-transaction limits (~32k scanned / ~16k written); larger subtrees drain
-// across multiple scheduled batches.
-const DELETE_BATCH_DOCS = 1000;
+// Descendant documents inspected when a move makes a subtree deeper. Most
+// moves do not need this scan; exceptionally large trees are rejected rather
+// than risking an over-limit transaction.
+const MOVE_SUBTREE_SCAN_LIMIT = 2000;
+
+// Documents deleted per subtree-delete batch. Each invocation follows one
+// root-to-leaf branch and never materializes the whole subtree.
+const DELETE_BATCH_DOCS = 500;
+const DELETE_BRANCH_WALK_LIMIT = 1000;
 
 // --- helpers ---------------------------------------------------------------
 
@@ -44,6 +49,65 @@ async function collectAncestors(
     steps++;
   }
   return ancestors;
+}
+
+async function assertSubtreeFitsDepth(
+  ctx: MutationCtx,
+  project: Doc<"projects">,
+  newDepth: number,
+) {
+  const maxRelativeDepth = MAX_FOLDER_DEPTH - newDepth;
+  const queue: Array<{
+    projectId: Id<"projects">;
+    relativeDepth: number;
+  }> = [{ projectId: project._id, relativeDepth: 0 }];
+  let inspected = 1;
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+
+    if (current.relativeDepth === maxRelativeDepth) {
+      const child = await ctx.db
+        .query("projects")
+        .withIndex("by_team_and_parent", (q) =>
+          q.eq("teamId", project.teamId).eq("parentId", current.projectId),
+        )
+        .first();
+      if (child) {
+        throw new Error(
+          `Folders can only be nested ${MAX_FOLDER_DEPTH} levels deep`,
+        );
+      }
+      continue;
+    }
+
+    const remaining = MOVE_SUBTREE_SCAN_LIMIT - inspected;
+    if (remaining <= 0) {
+      throw new Error(
+        "This folder tree is too large to move deeper. Move it closer to the top level instead.",
+      );
+    }
+
+    const children = await ctx.db
+      .query("projects")
+      .withIndex("by_team_and_parent", (q) =>
+        q.eq("teamId", project.teamId).eq("parentId", current.projectId),
+      )
+      .take(remaining + 1);
+    if (children.length > remaining) {
+      throw new Error(
+        "This folder tree is too large to move deeper. Move it closer to the top level instead.",
+      );
+    }
+
+    inspected += children.length;
+    for (const child of children) {
+      queue.push({
+        projectId: child._id,
+        relativeDepth: current.relativeDepth + 1,
+      });
+    }
+  }
 }
 
 /** Full "Parent / Child / Leaf" path for a folder, built from an in-memory map
@@ -325,18 +389,9 @@ export const move = mutation({
       if (newParent.teamId !== project.teamId) {
         throw new Error("Can't move a folder to a different team");
       }
-      // Keep the moved folder itself within the depth limit (cheap O(depth)
-      // walk, same as create). We deliberately do NOT also validate the moved
-      // subtree's height: that is an unbounded read that could exceed Convex's
-      // per-transaction index-range limit, and every descendant was created
-      // under this same limit, so the tree stays shallow in practice.
-      const newParentDepth = (await collectAncestors(ctx, newParent)).length;
-      if (newParentDepth + 1 > MAX_FOLDER_DEPTH) {
-        throw new Error(
-          `Folders can only be nested ${MAX_FOLDER_DEPTH} levels deep`,
-        );
-      }
-      // Reject moving into one of the folder's own descendants.
+
+      // Reject moving into one of the folder's own descendants before doing
+      // the wider subtree-height scan.
       let current: Doc<"projects"> | null = newParent;
       let steps = 0;
       while (current && steps <= ANCESTOR_WALK_LIMIT) {
@@ -347,6 +402,18 @@ export const move = mutation({
         current = await ctx.db.get(current.parentId);
         steps++;
       }
+
+      const currentDepth = (await collectAncestors(ctx, project)).length;
+      const newParentDepth = (await collectAncestors(ctx, newParent)).length;
+      const newDepth = newParentDepth + 1;
+      if (newDepth > MAX_FOLDER_DEPTH) {
+        throw new Error(
+          `Folders can only be nested ${MAX_FOLDER_DEPTH} levels deep`,
+        );
+      }
+      if (newDepth > currentDepth) {
+        await assertSubtreeFitsDepth(ctx, project, newDepth);
+      }
     }
 
     if (project.parentId === args.newParentId) return; // no-op
@@ -355,59 +422,74 @@ export const move = mutation({
 });
 
 /**
- * Deletes a single batch of the subtree rooted at `rootProjectId`: removes up to
- * DELETE_BATCH_DOCS documents' worth of videos (and their dependents) anywhere
- * in the subtree, and once no videos remain deletes every folder leaf-first.
- * Returns `{ done }` so the caller can schedule another batch for large trees.
+ * Deletes a bounded batch from the subtree rooted at `rootProjectId`. Each
+ * invocation walks one branch to a leaf, drains a bounded number of video
+ * records there, then deletes the empty leaf. Repeating this eventually removes
+ * the root without ever reading the entire subtree in one transaction.
  */
 async function runSubtreeDeleteBatch(
   ctx: MutationCtx,
   teamId: Id<"teams">,
   rootProjectId: Id<"projects">,
 ): Promise<{ done: boolean }> {
-  // Collect the subtree folder ids top-down via BFS over by_team_and_parent.
-  const folderIds: Id<"projects">[] = [];
   const root = await ctx.db.get(rootProjectId);
   if (!root) return { done: true }; // already gone
-  folderIds.push(rootProjectId);
-  const queue: Id<"projects">[] = [rootProjectId];
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    const children = await ctx.db
+  if (root.teamId !== teamId) {
+    throw new Error("Folder does not belong to the expected team");
+  }
+
+  // Walk to one leaf. The high fixed cap keeps the read cost bounded while
+  // still allowing deletion of trees corrupted before depth validation existed.
+  let leaf = root;
+  const visited = new Set<Id<"projects">>([root._id]);
+  for (let steps = 0; steps < DELETE_BRANCH_WALK_LIMIT; steps++) {
+    const child = await ctx.db
       .query("projects")
       .withIndex("by_team_and_parent", (q) =>
-        q.eq("teamId", teamId).eq("parentId", current),
+        q.eq("teamId", teamId).eq("parentId", leaf._id),
       )
-      .collect();
-    for (const child of children) {
-      folderIds.push(child._id);
-      queue.push(child._id);
+      .first();
+    if (!child) break;
+    if (visited.has(child._id)) {
+      throw new Error("Folder cycle detected during deletion");
     }
+    visited.add(child._id);
+    leaf = child;
   }
 
-  // Phase 1: delete videos (with dependents) across the subtree, up to budget.
+  const remainingChild = await ctx.db
+    .query("projects")
+    .withIndex("by_team_and_parent", (q) =>
+      q.eq("teamId", teamId).eq("parentId", leaf._id),
+    )
+    .first();
+  if (remainingChild) {
+    throw new Error("Folder tree is too deep to delete safely");
+  }
+
   let budget = DELETE_BATCH_DOCS;
-  for (const folderId of folderIds) {
-    if (budget <= 0) return { done: false };
-    const videos = await ctx.db
+  while (budget > 0) {
+    const video = await ctx.db
       .query("videos")
-      .withIndex("by_project", (q) => q.eq("projectId", folderId))
-      .take(budget);
-    for (const video of videos) {
-      budget -= await deleteVideoAndDependents(ctx, video._id);
-      if (budget <= 0) return { done: false };
+      .withIndex("by_project", (q) => q.eq("projectId", leaf._id))
+      .first();
+    if (!video) break;
+
+    const result = await deleteVideoAndDependentsBatch(
+      ctx,
+      video._id,
+      budget,
+    );
+    budget -= result.deleted;
+    if (!result.done || budget === 0) {
+      return { done: false };
     }
   }
 
-  // Phase 2: all videos gone — delete folders leaf-first (reverse BFS order).
-  // Budgeted too, so a very wide subtree can't exceed the write limit; the root
-  // sorts last, so it is removed only on the final batch.
-  for (const folderId of folderIds.reverse()) {
-    if (budget <= 0) return { done: false };
-    await ctx.db.delete(folderId);
-    budget--;
-  }
-  return { done: true };
+  if (budget === 0) return { done: false };
+
+  await ctx.db.delete(leaf._id);
+  return { done: leaf._id === rootProjectId };
 }
 
 export const remove = mutation({

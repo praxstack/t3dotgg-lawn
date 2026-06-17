@@ -177,10 +177,6 @@ export default function ProjectPage({
 
   const teamId = context?.team?._id;
   const { moveFromDrop } = useMoveActions();
-  const folders = useQuery(
-    api.projects.listForMove,
-    teamId ? { teamId } : "skip",
-  );
 
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [shareToast, setShareToast] = useState<ShareToastState | null>(null);
@@ -404,7 +400,6 @@ export default function ProjectPage({
             ? {
                 teamId,
                 targetProjectId: undefined,
-                folders,
                 disabled: !canUpload,
                 onDropMove: (payload) => handleDropMove(payload, undefined),
               }
@@ -422,7 +417,6 @@ export default function ProjectPage({
                   ? {
                       teamId,
                       targetProjectId: segment._id,
-                      folders,
                       disabled: !canUpload,
                       onDropMove: (payload: DragPayload) =>
                         handleDropMove(payload, segment._id),
@@ -501,7 +495,6 @@ export default function ProjectPage({
                       ? {
                           teamId,
                           currentParentId: resolvedProjectId,
-                          folders,
                           disabled: !canUpload,
                           onDropMove: handleDropMove,
                         }
