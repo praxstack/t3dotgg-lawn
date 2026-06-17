@@ -62,9 +62,13 @@ test("serves the latest ready version when the shared head is still processing",
 
   // The head (v2) is still processing, so both the head's and the older
   // version's public links should resolve to the ready v1 instead of failing.
+  // getByPublicIdForDownload shares the resolver, so it must stay in lockstep.
   for (const publicId of ["watch-v1", "watch-v2"]) {
     const result = await t.query(api.videos.getByPublicId, { publicId });
     expect(result?.video?._id).toBe(v1);
+
+    const download = await t.query(api.videos.getByPublicIdForDownload, { publicId });
+    expect(download?.video?._id).toBe(v1);
   }
 
   // Sanity: v2 really is the not-ready head.

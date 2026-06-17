@@ -230,7 +230,7 @@ export default function WatchPage() {
                   aria-label={`Select version, currently v${video.versionNumber}`}
                 >
                   <Layers3 className="h-4 w-4" />
-                  <span className="hidden sm:inline">v{video.versionNumber}</span>
+                  <span className="hidden font-mono sm:inline">v{video.versionNumber}</span>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-44">
@@ -247,7 +247,7 @@ export default function WatchPage() {
                         }
                       }}
                     >
-                      <span className="font-bold">v{version.versionNumber}</span>
+                      <span className="font-mono font-bold">v{version.versionNumber}</span>
                       {version.isLatest && <span className="ml-2 text-xs text-[#888]">Latest</span>}
                     </DropdownMenuRadioItem>
                   ))}

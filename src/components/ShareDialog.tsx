@@ -237,7 +237,7 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
           <div className="grid grid-cols-2 gap-2">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="w-full justify-between font-normal">
+                <Button variant="outline" className="w-full justify-between">
                   {newLinkOptions.expiresInDays
                     ? `${newLinkOptions.expiresInDays} days`
                     : "Never expires"}

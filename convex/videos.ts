@@ -31,6 +31,20 @@ const VIDEO_STACK_CHAIN_ERROR =
   "A video version stack must be one connected acyclic chain within a single project.";
 const VIDEO_STACK_PROJECT_ERROR = "All versions of a video must belong to the same project";
 
+const STACK_INVARIANT_ERROR_MESSAGES = new Set([
+  VIDEO_STACK_LIMIT_ERROR,
+  VIDEO_STACK_HEAD_ERROR,
+  VIDEO_STACK_CHAIN_ERROR,
+  VIDEO_STACK_PROJECT_ERROR,
+]);
+
+// Stack traversal throws these when a stack's shape is corrupt. Callers may
+// degrade gracefully on those (operate on the single row), but genuine
+// DB/runtime failures must propagate rather than be silently swallowed.
+function isStackInvariantError(error: unknown): boolean {
+  return error instanceof Error && STACK_INVARIANT_ERROR_MESSAGES.has(error.message);
+}
+
 type WorkflowStatus = "review" | "rework" | "done";
 type StackReadCtx = Pick<QueryCtx, "db">;
 
@@ -605,12 +619,26 @@ function isPublicReadyVersion(video: Doc<"videos">) {
 }
 
 async function readStackVersions(ctx: StackReadCtx, video: Doc<"videos">) {
-  // Fall back to the row alone if the stack is somehow malformed, so a public
-  // viewer never hits an invariant error on a hot path.
   try {
     const { oldestToNewest } = await getOrderedStackVersions(ctx, video);
     return oldestToNewest;
-  } catch {
+  } catch (error) {
+    // Fall back to the row alone if the stack is malformed, so a public viewer
+    // never hits an invariant error on a hot path. Real failures still propagate.
+    if (!isStackInvariantError(error)) throw error;
+    return [video];
+  }
+}
+
+// Mutation-side counterpart of readStackVersions. Lets an owner still update the
+// row they're acting on when the stack is malformed, instead of being locked out
+// of changing visibility/browsing by an invariant error.
+async function readStackVersionsForUpdate(ctx: StackReadCtx, video: Doc<"videos">) {
+  try {
+    const { versions } = await getStackVersions(ctx, video);
+    return versions;
+  } catch (error) {
+    if (!isStackInvariantError(error)) throw error;
     return [video];
   }
 }
@@ -915,7 +943,7 @@ export const setVisibility = mutation({
     // Visibility is a property of the whole video, not a single cut. Apply it to
     // every version in the stack so the public/private state can't drift between
     // versions (each version carries its own `visibility` row).
-    const { versions } = await getStackVersions(ctx, video);
+    const versions = await readStackVersionsForUpdate(ctx, video);
     for (const version of versions) {
       if (version.visibility !== args.visibility) {
         await ctx.db.patch(version._id, { visibility: args.visibility });
@@ -934,7 +962,7 @@ export const setPublicVersionBrowsing = mutation({
 
     // Like visibility, version browsing is a property of the whole video. Keep it
     // consistent across every version in the stack.
-    const { versions } = await getStackVersions(ctx, video);
+    const versions = await readStackVersionsForUpdate(ctx, video);
     for (const version of versions) {
       if (publicVersionBrowsingEnabled(version) !== args.enabled) {
         await ctx.db.patch(version._id, { allowPublicVersionBrowsing: args.enabled });
