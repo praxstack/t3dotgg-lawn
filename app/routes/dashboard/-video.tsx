@@ -200,6 +200,7 @@ export default function VideoPage() {
   const updateVideoWorkflowStatus = useMutation(api.videos.updateWorkflowStatus);
   const deleteVideo = useMutation(api.videos.remove);
   const checkMuxAssetStatus = useAction(api.videoActions.checkMuxAssetStatus);
+  const retryFailedProcessing = useAction(api.videoActions.markUploadComplete);
   const getPlaybackSession = useAction(api.videoActions.getPlaybackSession);
   const getOriginalPlaybackUrl = useAction(api.videoActions.getOriginalPlaybackUrl);
   const getDownloadUrl = useAction(api.videoActions.getDownloadUrl);
@@ -218,6 +219,8 @@ export default function VideoPage() {
   const [isLoadingPlayback, setIsLoadingPlayback] = useState(false);
   const [originalPlaybackUrl, setOriginalPlaybackUrl] = useState<string | null>(null);
   const [isLoadingOriginalPlayback, setIsLoadingOriginalPlayback] = useState(false);
+  const [isRetryingFailedProcessing, setIsRetryingFailedProcessing] = useState(false);
+  const [retryFailedProcessingError, setRetryFailedProcessingError] = useState<string | null>(null);
   const [preferredSource, setPreferredSource] = useState<"mux720" | "original">("original");
   const playerRef = useRef<VideoPlayerHandle | null>(null);
   const isPlayable = video?.status === "ready" && Boolean(video?.muxPlaybackId);
@@ -450,6 +453,22 @@ export default function VideoPage() {
     }
   }, [deleteVideo, navigate, resolvedProjectId, resolvedTeamSlug, resolvedVideoId, video]);
 
+  const handleRetryFailedProcessing = useCallback(async () => {
+    if (!resolvedVideoId) return;
+
+    setIsRetryingFailedProcessing(true);
+    setRetryFailedProcessingError(null);
+    try {
+      await retryFailedProcessing({ videoId: resolvedVideoId });
+    } catch (error) {
+      setRetryFailedProcessingError(
+        error instanceof Error ? error.message : "Failed to retry video processing.",
+      );
+    } finally {
+      setIsRetryingFailedProcessing(false);
+    }
+  }, [resolvedVideoId, retryFailedProcessing]);
+
   const startEditingTitle = () => {
     if (video) {
       setEditedTitle(video.title);
@@ -476,6 +495,7 @@ export default function VideoPage() {
   const canEdit = video.role !== "viewer";
   const canDelete = video.role === "owner" || video.role === "admin";
   const canComment = true;
+  const showVersionSelector = (versions?.length ?? 0) > 1;
 
   return (
     <div className="flex h-full flex-col">
@@ -554,13 +574,15 @@ export default function VideoPage() {
           <VideoWatchers watchers={watchers} />
         </div>
         <div className="ml-1 hidden flex-shrink-0 items-center gap-3 border-l-2 border-[#1a1a1a]/20 pl-3 lg:flex">
-          <VersionSelector
-            versions={versions}
-            currentVideoId={resolvedVideoId}
-            currentVersionNumber={video.versionNumber}
-            teamSlug={resolvedTeamSlug}
-            onSelect={handleVersionSelected}
-          />
+          {showVersionSelector && (
+            <VersionSelector
+              versions={versions}
+              currentVideoId={resolvedVideoId}
+              currentVersionNumber={video.versionNumber}
+              teamSlug={resolvedTeamSlug}
+              onSelect={handleVersionSelected}
+            />
+          )}
           {canEdit && (
             <UploadButton
               multiple={false}
@@ -609,14 +631,16 @@ export default function VideoPage() {
 
         {/* Compact: workflow status + consolidated menu until large screens */}
         <div className="flex items-center gap-2 lg:hidden">
-          <VersionSelector
-            versions={versions}
-            currentVideoId={resolvedVideoId}
-            currentVersionNumber={video.versionNumber}
-            teamSlug={resolvedTeamSlug}
-            onSelect={handleVersionSelected}
-            compact
-          />
+          {showVersionSelector && (
+            <VersionSelector
+              versions={versions}
+              currentVideoId={resolvedVideoId}
+              currentVersionNumber={video.versionNumber}
+              teamSlug={resolvedTeamSlug}
+              onSelect={handleVersionSelected}
+              compact
+            />
+          )}
           <VideoWorkflowStatusControl
             status={video.workflowStatus}
             size="lg"
@@ -733,7 +757,34 @@ export default function VideoPage() {
                         : "Processing video..."}
                     </p>
                   )}
-                  {video.status === "failed" && <p className="text-[#dc2626]">Processing failed</p>}
+                  {video.status === "failed" && (
+                    <div className="flex max-w-md flex-col items-center gap-3 px-6">
+                      <p className="font-bold text-[#f87171]">Processing failed</p>
+                      {video.uploadError && (
+                        <p className="text-sm text-white/60">{video.uploadError}</p>
+                      )}
+                      {video.isLatestVersion && showVersionSelector && (
+                        <p className="text-sm text-white/60">
+                          Previous versions are still available from the version menu.
+                        </p>
+                      )}
+                      {canEdit && video.s3Key && (
+                        <Button
+                          variant="outline"
+                          onClick={() => void handleRetryFailedProcessing()}
+                          disabled={isRetryingFailedProcessing}
+                        >
+                          {isRetryingFailedProcessing && (
+                            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                          )}
+                          Retry processing
+                        </Button>
+                      )}
+                      {retryFailedProcessingError && (
+                        <p className="text-sm text-[#f87171]">{retryFailedProcessingError}</p>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

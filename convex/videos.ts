@@ -26,6 +26,7 @@ const visibilityValidator = v.union(v.literal("public"), v.literal("private"));
 const VIDEO_DELETE_BATCH_DOCS = 500;
 export const MAX_VIDEO_STACK_SIZE = 100;
 const VIDEO_STACK_LIMIT_ERROR = `A video can have at most ${MAX_VIDEO_STACK_SIZE} versions.`;
+const VIDEO_STACK_HEAD_ERROR = "A video version stack must have exactly one latest version.";
 
 type WorkflowStatus = "review" | "rework" | "done";
 type StackReadCtx = Pick<QueryCtx, "db">;
@@ -40,7 +41,10 @@ function normalizeVersionNumber(video: Doc<"videos">) {
 
 async function getStackVersions(ctx: StackReadCtx, video: Doc<"videos">) {
   if (!video.versionStackId) {
-    return [video];
+    return {
+      versions: [video],
+      latest: video,
+    };
   }
 
   const versions = await ctx.db
@@ -55,7 +59,20 @@ async function getStackVersions(ctx: StackReadCtx, video: Doc<"videos">) {
     throw new Error(VIDEO_STACK_LIMIT_ERROR);
   }
 
-  return versions;
+  const latestVersions = versions.filter(
+    (stackVersion) => stackVersion.supersededByVideoId === undefined,
+  );
+  if (latestVersions.length !== 1) {
+    throw new Error(VIDEO_STACK_HEAD_ERROR);
+  }
+
+  return {
+    versions: [...versions].sort(
+      (a, b) =>
+        normalizeVersionNumber(b) - normalizeVersionNumber(a) || b._creationTime - a._creationTime,
+    ),
+    latest: latestVersions[0],
+  };
 }
 
 async function getPredecessor(ctx: MutationCtx, videoId: Id<"videos">) {
@@ -80,7 +97,6 @@ async function failOrRollbackUpload(ctx: MutationCtx, video: Doc<"videos">, uplo
   if (
     video.versionStackId &&
     video.versionNumber !== undefined &&
-    video.status !== "processing" &&
     video.status !== "ready" &&
     !video.muxAssetId
   ) {
@@ -296,9 +312,9 @@ export async function createVersionRecord(
     throw new Error("Video not found");
   }
 
-  const versions = await getStackVersions(ctx, sourceVideo);
+  const { versions, latest } = await getStackVersions(ctx, sourceVideo);
   return await insertVersionRecord(ctx, {
-    latest: versions[0] ?? sourceVideo,
+    latest,
     stackSize: versions.length,
     uploadedByClerkId: args.uploadedByClerkId,
     uploaderName: args.uploaderName,
@@ -354,8 +370,7 @@ export const createVersion = mutation({
       args.sourceVideoId,
       "member",
     );
-    const versions = await getStackVersions(ctx, sourceVideo);
-    const latest = versions[0] ?? sourceVideo;
+    const { versions, latest } = await getStackVersions(ctx, sourceVideo);
     const { project } = await requireProjectAccess(ctx, latest.projectId, "member");
 
     assertVideoFileSizeAllowed(args.fileSize ?? 0);
@@ -425,7 +440,7 @@ export const listVersions = query({
   handler: async (ctx, args) => {
     const { video } = await requireVideoAccess(ctx, args.videoId);
 
-    const versions = await getStackVersions(ctx, video);
+    const { versions } = await getStackVersions(ctx, video);
 
     return versions.map((version) => ({
       _id: version._id,
@@ -593,7 +608,11 @@ export const move = mutation({
     // Validate access to the SOURCE: `requireVideoAccess` loads the video and its
     // current (source) project, and requires `member` on the source folder's team.
     const { project: sourceProject, video } = await requireVideoAccess(ctx, args.videoId, "member");
-    const versions = await getStackVersions(ctx, video);
+    const { versions } = await getStackVersions(ctx, video);
+
+    if (!versions.every((version) => version.projectId === sourceProject._id)) {
+      throw new Error("All versions of a video must belong to the same project");
+    }
 
     if (sourceProject._id === args.projectId) {
       return; // no-op: dropped back into the same folder

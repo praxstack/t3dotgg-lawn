@@ -3,6 +3,7 @@
 import { convexTest } from "convex-test";
 import { expect, test } from "vitest";
 import { api, internal } from "./_generated/api";
+import { getTeamStorageUsedBytes } from "./billingHelpers";
 import { createVersionRecord, MAX_VIDEO_STACK_SIZE } from "./videos";
 import schema from "./schema";
 
@@ -104,6 +105,121 @@ test("materializes v1 and appends after the actual latest version", async () => 
   expect(visible.map((video) => [video._id, video.versionNumber])).toEqual([[v3, 3]]);
 });
 
+test("selects the stack head independently of version number ordering", async () => {
+  const t = convexTest(schema, modules);
+  const seeded = await t.run(async (ctx) => {
+    const teamId = await ctx.db.insert("teams", {
+      name: "Garden",
+      slug: "garden",
+      ownerClerkId: "owner",
+      plan: "basic",
+    });
+    const projectId = await ctx.db.insert("projects", {
+      teamId,
+      name: "Campaign",
+    });
+    const v1 = await ctx.db.insert("videos", {
+      projectId,
+      uploadedByClerkId: "owner",
+      uploaderName: "Owner",
+      title: "Cut",
+      visibility: "public",
+      publicId: "head-v1",
+      status: "ready",
+      workflowStatus: "review",
+    });
+    return { v1 };
+  });
+
+  const { videoId: v2 } = await t.run((ctx) =>
+    createVersionRecord(ctx, {
+      sourceVideoId: seeded.v1,
+      uploadedByClerkId: "owner",
+      uploaderName: "Owner",
+      publicId: "head-v2",
+    }),
+  );
+  const { videoId: v3 } = await t.run((ctx) =>
+    createVersionRecord(ctx, {
+      sourceVideoId: seeded.v1,
+      uploadedByClerkId: "owner",
+      uploaderName: "Owner",
+      publicId: "head-v3",
+    }),
+  );
+  await t.run((ctx) => ctx.db.patch(v2, { versionNumber: 99 }));
+
+  const { videoId: v4 } = await t.run((ctx) =>
+    createVersionRecord(ctx, {
+      sourceVideoId: v2,
+      uploadedByClerkId: "owner",
+      uploaderName: "Owner",
+      publicId: "head-v4",
+    }),
+  );
+
+  const state = await t.run(async (ctx) => ({
+    v2: await ctx.db.get(v2),
+    v3: await ctx.db.get(v3),
+    v4: await ctx.db.get(v4),
+  }));
+  expect(state.v2?.supersededByVideoId).toBe(v3);
+  expect(state.v3?.supersededByVideoId).toBe(v4);
+  expect(state.v4?.versionNumber).toBe(4);
+});
+
+test("rejects a stack with more than one head", async () => {
+  const t = convexTest(schema, modules);
+  const seeded = await t.run(async (ctx) => {
+    const teamId = await ctx.db.insert("teams", {
+      name: "Garden",
+      slug: "garden",
+      ownerClerkId: "owner",
+      plan: "basic",
+    });
+    const projectId = await ctx.db.insert("projects", {
+      teamId,
+      name: "Campaign",
+    });
+    const v1 = await ctx.db.insert("videos", {
+      projectId,
+      uploadedByClerkId: "owner",
+      uploaderName: "Owner",
+      title: "Cut",
+      visibility: "public",
+      publicId: "multi-head-v1",
+      status: "ready",
+      workflowStatus: "review",
+      versionNumber: 1,
+    });
+    await ctx.db.patch(v1, { versionStackId: v1 });
+    const v2 = await ctx.db.insert("videos", {
+      projectId,
+      uploadedByClerkId: "owner",
+      uploaderName: "Owner",
+      title: "Cut",
+      visibility: "public",
+      publicId: "multi-head-v2",
+      status: "ready",
+      workflowStatus: "review",
+      versionStackId: v1,
+      versionNumber: 2,
+    });
+    return { v1, v2 };
+  });
+
+  await expect(
+    t.run((ctx) =>
+      createVersionRecord(ctx, {
+        sourceVideoId: seeded.v1,
+        uploadedByClerkId: "owner",
+        uploaderName: "Owner",
+        publicId: "multi-head-v3",
+      }),
+    ),
+  ).rejects.toThrow("exactly one latest version");
+});
+
 test("moves the whole stack and rewires middle and latest deletions", async () => {
   const t = convexTest(schema, modules);
   const seeded = await t.run(async (ctx) => {
@@ -195,6 +311,64 @@ test("moves the whole stack and rewires middle and latest deletions", async () =
   expect(visible.map((video) => [video._id, video.versionNumber])).toEqual([[seeded.v1, 1]]);
 });
 
+test("refuses to move a stack whose versions do not share the source project", async () => {
+  const t = convexTest(schema, modules);
+  const seeded = await t.run(async (ctx) => {
+    const teamId = await ctx.db.insert("teams", {
+      name: "Garden",
+      slug: "garden",
+      ownerClerkId: "owner",
+      plan: "basic",
+    });
+    await ctx.db.insert("teamMembers", {
+      teamId,
+      userClerkId: "owner",
+      userEmail: "owner@example.com",
+      userName: "Owner",
+      role: "owner",
+    });
+    const sourceProjectId = await ctx.db.insert("projects", {
+      teamId,
+      name: "Source",
+    });
+    const mismatchedProjectId = await ctx.db.insert("projects", {
+      teamId,
+      name: "Mismatched",
+    });
+    const destinationProjectId = await ctx.db.insert("projects", {
+      teamId,
+      name: "Destination",
+    });
+    const v1 = await ctx.db.insert("videos", {
+      projectId: sourceProjectId,
+      uploadedByClerkId: "owner",
+      uploaderName: "Owner",
+      title: "Cut",
+      visibility: "public",
+      publicId: "mismatch-v1",
+      status: "ready",
+      workflowStatus: "review",
+    });
+    return { sourceProjectId, mismatchedProjectId, destinationProjectId, v1 };
+  });
+  const { videoId: v2 } = await t.run((ctx) =>
+    createVersionRecord(ctx, {
+      sourceVideoId: seeded.v1,
+      uploadedByClerkId: "owner",
+      uploaderName: "Owner",
+      publicId: "mismatch-v2",
+    }),
+  );
+  await t.run((ctx) => ctx.db.patch(seeded.v1, { projectId: seeded.mismatchedProjectId }));
+
+  await expect(
+    t.withIdentity({ subject: "owner" }).mutation(api.videos.move, {
+      videoId: v2,
+      projectId: seeded.destinationProjectId,
+    }),
+  ).rejects.toThrow("must belong to the same project");
+});
+
 test("deleting the first version preserves the remaining stack", async () => {
   const t = convexTest(schema, modules);
   const seeded = await t.run(async (ctx) => {
@@ -257,6 +431,95 @@ test("deleting the first version preserves the remaining stack", async () => {
 
   const visible = await authed.query(api.videos.list, { projectId: seeded.projectId });
   expect(visible.map((video) => video._id)).toEqual([v3]);
+});
+
+test("deletes an unstacked legacy video with no replacement", async () => {
+  const t = convexTest(schema, modules);
+  const videoId = await t.run(async (ctx) => {
+    const teamId = await ctx.db.insert("teams", {
+      name: "Garden",
+      slug: "garden",
+      ownerClerkId: "owner",
+      plan: "basic",
+    });
+    await ctx.db.insert("teamMembers", {
+      teamId,
+      userClerkId: "owner",
+      userEmail: "owner@example.com",
+      userName: "Owner",
+      role: "owner",
+    });
+    const projectId = await ctx.db.insert("projects", {
+      teamId,
+      name: "Campaign",
+    });
+    return await ctx.db.insert("videos", {
+      projectId,
+      uploadedByClerkId: "owner",
+      uploaderName: "Owner",
+      title: "Legacy cut",
+      visibility: "public",
+      publicId: "legacy-only",
+      status: "ready",
+      workflowStatus: "review",
+    });
+  });
+
+  const result = await t
+    .withIdentity({ subject: "owner" })
+    .mutation(api.videos.remove, { videoId });
+  expect(result.replacementVideoId).toBeNull();
+  await expect(t.run((ctx) => ctx.db.get(videoId))).resolves.toBeNull();
+});
+
+test("storage counts every stored version while project lists only the head", async () => {
+  const t = convexTest(schema, modules);
+  const seeded = await t.run(async (ctx) => {
+    const teamId = await ctx.db.insert("teams", {
+      name: "Garden",
+      slug: "garden",
+      ownerClerkId: "owner",
+      plan: "basic",
+    });
+    await ctx.db.insert("teamMembers", {
+      teamId,
+      userClerkId: "owner",
+      userEmail: "owner@example.com",
+      userName: "Owner",
+      role: "owner",
+    });
+    const projectId = await ctx.db.insert("projects", {
+      teamId,
+      name: "Campaign",
+    });
+    const v1 = await ctx.db.insert("videos", {
+      projectId,
+      uploadedByClerkId: "owner",
+      uploaderName: "Owner",
+      title: "Cut",
+      visibility: "public",
+      publicId: "storage-v1",
+      fileSize: 100,
+      status: "ready",
+      workflowStatus: "review",
+    });
+    return { teamId, projectId, v1 };
+  });
+  const { videoId: v2 } = await t.run((ctx) =>
+    createVersionRecord(ctx, {
+      sourceVideoId: seeded.v1,
+      uploadedByClerkId: "owner",
+      uploaderName: "Owner",
+      publicId: "storage-v2",
+      fileSize: 200,
+    }),
+  );
+
+  await expect(t.run((ctx) => getTeamStorageUsedBytes(ctx, seeded.teamId))).resolves.toBe(300);
+  const listed = await t
+    .withIdentity({ subject: "owner" })
+    .query(api.videos.list, { projectId: seeded.projectId });
+  expect(listed.map((video) => video._id)).toEqual([v2]);
 });
 
 test("public version paths enforce authentication and member authorization", async () => {
@@ -374,6 +637,184 @@ test("abandoned version uploads atomically restore the previous head", async () 
     .withIdentity({ subject: "owner" })
     .query(api.videos.list, { projectId: seeded.projectId });
   expect(visible.map((video) => video._id)).toEqual([seeded.v1]);
+});
+
+test("hard failure after promotion rolls back a version before a Mux asset exists", async () => {
+  const t = convexTest(schema, modules);
+  const seeded = await t.run(async (ctx) => {
+    const teamId = await ctx.db.insert("teams", {
+      name: "Garden",
+      slug: "garden",
+      ownerClerkId: "owner",
+      plan: "basic",
+    });
+    const projectId = await ctx.db.insert("projects", {
+      teamId,
+      name: "Campaign",
+    });
+    const v1 = await ctx.db.insert("videos", {
+      projectId,
+      uploadedByClerkId: "owner",
+      uploaderName: "Owner",
+      title: "Cut",
+      visibility: "public",
+      publicId: "promoted-v1",
+      status: "ready",
+      workflowStatus: "review",
+    });
+    return { v1 };
+  });
+  const { videoId: v2 } = await t.run((ctx) =>
+    createVersionRecord(ctx, {
+      sourceVideoId: seeded.v1,
+      uploadedByClerkId: "owner",
+      uploaderName: "Owner",
+      publicId: "promoted-v2",
+    }),
+  );
+  await t.mutation(internal.videos.markAsProcessing, { videoId: v2 });
+
+  const result = await t.mutation(internal.videos.finalizeAbandonedUpload, {
+    videoId: v2,
+    uploadError: "Uploaded object failed validation.",
+  });
+  expect(result.removedVersion).toBe(true);
+
+  const state = await t.run(async (ctx) => ({
+    v1: await ctx.db.get(seeded.v1),
+    v2: await ctx.db.get(v2),
+  }));
+  expect(state.v2).toBeNull();
+  expect(state.v1?.supersededByVideoId).toBeUndefined();
+});
+
+test("failure after Mux promotion stays retryable as the latest version", async () => {
+  const t = convexTest(schema, modules);
+  const seeded = await t.run(async (ctx) => {
+    const teamId = await ctx.db.insert("teams", {
+      name: "Garden",
+      slug: "garden",
+      ownerClerkId: "owner",
+      plan: "basic",
+    });
+    await ctx.db.insert("teamMembers", {
+      teamId,
+      userClerkId: "owner",
+      userEmail: "owner@example.com",
+      userName: "Owner",
+      role: "owner",
+    });
+    const projectId = await ctx.db.insert("projects", {
+      teamId,
+      name: "Campaign",
+    });
+    const v1 = await ctx.db.insert("videos", {
+      projectId,
+      uploadedByClerkId: "owner",
+      uploaderName: "Owner",
+      title: "Cut",
+      visibility: "public",
+      publicId: "retryable-v1",
+      status: "ready",
+      workflowStatus: "review",
+    });
+    return { projectId, v1 };
+  });
+  const { videoId: v2 } = await t.run((ctx) =>
+    createVersionRecord(ctx, {
+      sourceVideoId: seeded.v1,
+      uploadedByClerkId: "owner",
+      uploaderName: "Owner",
+      publicId: "retryable-v2",
+    }),
+  );
+  await t.run((ctx) =>
+    ctx.db.patch(v2, {
+      s3Key: "videos/retryable-v2/cut.mp4",
+      status: "processing",
+      muxAssetId: "mux-asset-v2",
+    }),
+  );
+
+  const updated = await t.mutation(internal.videos.markMuxAssetAsFailed, {
+    videoId: v2,
+    muxAssetId: "mux-asset-v2",
+    uploadError: "Mux could not encode this asset.",
+  });
+  expect(updated).toBe(true);
+
+  const state = await t.run(async (ctx) => ({
+    v1: await ctx.db.get(seeded.v1),
+    v2: await ctx.db.get(v2),
+  }));
+  expect(state.v1?.supersededByVideoId).toBe(v2);
+  expect(state.v2).toMatchObject({
+    status: "failed",
+    s3Key: "videos/retryable-v2/cut.mp4",
+  });
+
+  const listed = await t
+    .withIdentity({ subject: "owner" })
+    .query(api.videos.list, { projectId: seeded.projectId });
+  expect(listed.map((video) => video._id)).toEqual([v2]);
+});
+
+test("abandoned upload with a Mux asset exercises the kept-as-failed branch", async () => {
+  const t = convexTest(schema, modules);
+  const videoId = await t.run(async (ctx) => {
+    const teamId = await ctx.db.insert("teams", {
+      name: "Garden",
+      slug: "garden",
+      ownerClerkId: "owner",
+      plan: "basic",
+    });
+    const projectId = await ctx.db.insert("projects", {
+      teamId,
+      name: "Campaign",
+    });
+    const v1 = await ctx.db.insert("videos", {
+      projectId,
+      uploadedByClerkId: "owner",
+      uploaderName: "Owner",
+      title: "Cut",
+      visibility: "public",
+      publicId: "kept-v1",
+      status: "ready",
+      workflowStatus: "review",
+      versionNumber: 1,
+    });
+    await ctx.db.patch(v1, { versionStackId: v1 });
+    const v2 = await ctx.db.insert("videos", {
+      projectId,
+      uploadedByClerkId: "owner",
+      uploaderName: "Owner",
+      title: "Cut",
+      visibility: "public",
+      publicId: "kept-v2",
+      status: "processing",
+      workflowStatus: "review",
+      versionStackId: v1,
+      versionNumber: 2,
+      muxAssetId: "mux-asset",
+      s3Key: "videos/kept-v2/cut.mp4",
+    });
+    await ctx.db.patch(v1, { supersededByVideoId: v2 });
+    return v2;
+  });
+
+  const result = await t.mutation(internal.videos.finalizeAbandonedUpload, {
+    videoId,
+    uploadError: "Permanent processing failure.",
+  });
+  expect(result.removedVersion).toBe(false);
+
+  const failed = await t.run((ctx) => ctx.db.get(videoId));
+  expect(failed).toMatchObject({
+    status: "failed",
+    muxAssetStatus: "errored",
+    uploadError: "Permanent processing failure.",
+  });
+  expect(failed?.s3Key).toBeUndefined();
 });
 
 test("stale provisional versions roll back even before storage is initiated", async () => {
