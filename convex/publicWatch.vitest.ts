@@ -72,8 +72,8 @@ test("serves the latest ready version when the shared head is still processing",
   expect(head?.status).toBe("uploading");
 });
 
-test("serves the newest version once it becomes ready", async () => {
-  const { t, v2 } = await seedPublicStack();
+test("each version link resolves to its own version once ready (browsing on)", async () => {
+  const { t, v1, v2 } = await seedPublicStack();
 
   await t.run(async (ctx) => {
     await ctx.db.patch(v2 as Id<"videos">, {
@@ -82,10 +82,56 @@ test("serves the newest version once it becomes ready", async () => {
     });
   });
 
+  const r1 = await t.query(api.videos.getByPublicId, { publicId: "watch-v1" });
+  expect(r1?.video?._id).toBe(v1);
+  expect(r1?.video?.versionNumber).toBe(1);
+
+  const r2 = await t.query(api.videos.getByPublicId, { publicId: "watch-v2" });
+  expect(r2?.video?._id).toBe(v2);
+  expect(r2?.video?.versionNumber).toBe(2);
+  expect(r2?.allowVersionBrowsing).toBe(true);
+
+  // The switcher lists every public, ready version oldest-first.
+  const versions = await t.query(api.videos.listPublicVersions, { publicId: "watch-v1" });
+  expect(versions.map((version) => [version.versionNumber, version.isLatest])).toEqual([
+    [1, false],
+    [2, true],
+  ]);
+});
+
+test("disabling version browsing collapses links to the latest version", async () => {
+  const { t, v1, v2 } = await seedPublicStack();
+
+  await t.run(async (ctx) => {
+    await ctx.db.patch(v2 as Id<"videos">, {
+      status: "ready",
+      muxPlaybackId: "playback-v2",
+    });
+  });
+
+  await t.withIdentity({ subject: "user_1" }).mutation(api.videos.setPublicVersionBrowsing, {
+    videoId: v1 as Id<"videos">,
+    enabled: false,
+  });
+
+  // The flag is applied across every version in the stack.
+  const flags = await t.run(async (ctx) => ({
+    v1: (await ctx.db.get(v1 as Id<"videos">))?.allowPublicVersionBrowsing,
+    v2: (await ctx.db.get(v2 as Id<"videos">))?.allowPublicVersionBrowsing,
+  }));
+  expect(flags.v1).toBe(false);
+  expect(flags.v2).toBe(false);
+
+  // With browsing off, every link resolves to the latest ready version...
   for (const publicId of ["watch-v1", "watch-v2"]) {
     const result = await t.query(api.videos.getByPublicId, { publicId });
     expect(result?.video?._id).toBe(v2);
+    expect(result?.allowVersionBrowsing).toBe(false);
   }
+
+  // ...and the switcher is empty.
+  const versions = await t.query(api.videos.listPublicVersions, { publicId: "watch-v1" });
+  expect(versions).toEqual([]);
 });
 
 test("setVisibility toggles every version in the stack and gates the public URL", async () => {

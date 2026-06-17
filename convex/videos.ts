@@ -590,9 +590,39 @@ export const listVersions = query({
 });
 
 type PublicWatchResolution =
-  | { state: "ready"; video: Doc<"videos"> }
+  | { state: "ready"; video: Doc<"videos">; allowVersionBrowsing: boolean }
   | { state: "processing"; title: string }
   | { state: "unavailable" };
+
+// Version browsing is on unless explicitly disabled, so existing public videos
+// keep working without a backfill.
+function publicVersionBrowsingEnabled(video: Doc<"videos">) {
+  return video.allowPublicVersionBrowsing !== false;
+}
+
+function isPublicReadyVersion(video: Doc<"videos">) {
+  return video.visibility === "public" && video.status === "ready";
+}
+
+async function readStackVersions(ctx: StackReadCtx, video: Doc<"videos">) {
+  // Fall back to the row alone if the stack is somehow malformed, so a public
+  // viewer never hits an invariant error on a hot path.
+  try {
+    const { oldestToNewest } = await getOrderedStackVersions(ctx, video);
+    return oldestToNewest;
+  } catch {
+    return [video];
+  }
+}
+
+function latestPublicReadyVersion(stackVersions: Doc<"videos">[]) {
+  for (let index = stackVersions.length - 1; index >= 0; index--) {
+    if (isPublicReadyVersion(stackVersions[index])) {
+      return stackVersions[index];
+    }
+  }
+  return undefined;
+}
 
 /**
  * Resolves what a public `/watch/<publicId>` link should show.
@@ -600,11 +630,15 @@ type PublicWatchResolution =
  * Each version in a stack is its own `videos` row with its own `publicId`, so the
  * shared link can point at a version that is not the one that should currently
  * play publicly — e.g. a freshly uploaded version that is still processing, or an
- * older superseded cut. Marking the linked version private still disables the URL,
- * but otherwise we serve the latest version of the stack that is both public and
- * ready. If nothing is ready yet but a public version is still uploading or
- * transcoding, we report `processing` so the viewer sees "ready soon" instead of
- * "video unavailable".
+ * older superseded cut. Marking the linked version private still disables the URL.
+ *
+ * When version browsing is enabled (the default), the link resolves to its own
+ * version when that version is ready, so viewers can switch between versions by
+ * URL. When browsing is disabled, every link collapses to the latest ready
+ * version and the switcher is hidden. Either way, if the chosen version isn't
+ * ready we fall back to the latest ready version, and if nothing is ready yet but
+ * a public version is still uploading/transcoding we report `processing` so the
+ * viewer sees "ready soon" instead of "video unavailable".
  */
 async function resolvePublicWatch(
   ctx: StackReadCtx,
@@ -619,22 +653,16 @@ async function resolvePublicWatch(
     return { state: "unavailable" };
   }
 
-  // Fall back to the matched row alone if the stack is somehow malformed, so a
-  // public viewer never hits an invariant error on a hot path.
-  let stackVersions: Doc<"videos">[] = [matched];
-  try {
-    const { oldestToNewest } = await getOrderedStackVersions(ctx, matched);
-    stackVersions = oldestToNewest;
-  } catch {
-    stackVersions = [matched];
-  }
+  const allowVersionBrowsing = publicVersionBrowsingEnabled(matched);
+  const stackVersions = await readStackVersions(ctx, matched);
 
-  // Prefer the latest version that is both public and ready.
-  for (let index = stackVersions.length - 1; index >= 0; index--) {
-    const candidate = stackVersions[index];
-    if (candidate.visibility === "public" && candidate.status === "ready") {
-      return { state: "ready", video: candidate };
-    }
+  const served =
+    allowVersionBrowsing && isPublicReadyVersion(matched)
+      ? matched
+      : latestPublicReadyVersion(stackVersions);
+
+  if (served) {
+    return { state: "ready", video: served, allowVersionBrowsing };
   }
 
   // Nothing is playable yet — if a public version is still in flight, tell the
@@ -681,8 +709,11 @@ export const getByPublicId = query({
     return {
       processing: false as const,
       title: video.title,
+      allowVersionBrowsing: resolution.allowVersionBrowsing,
       video: {
         _id: video._id,
+        publicId: video.publicId,
+        versionNumber: normalizeVersionNumber(video),
         title: video.title,
         description: video.description,
         duration: video.duration,
@@ -693,6 +724,39 @@ export const getByPublicId = query({
         s3Key: video.s3Key,
       },
     };
+  },
+});
+
+/**
+ * Lists the versions a public viewer can switch between for a `/watch/<publicId>`
+ * link: every public, ready version in the stack, oldest first. Returns an empty
+ * list when the video is private or the owner disabled version browsing.
+ */
+export const listPublicVersions = query({
+  args: { publicId: v.string() },
+  returns: v.array(
+    v.object({
+      publicId: v.string(),
+      versionNumber: v.number(),
+      isLatest: v.boolean(),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const matched = await ctx.db
+      .query("videos")
+      .withIndex("by_public_id", (q) => q.eq("publicId", args.publicId))
+      .unique();
+
+    if (!matched || matched.visibility !== "public" || !publicVersionBrowsingEnabled(matched)) {
+      return [];
+    }
+
+    const stackVersions = await readStackVersions(ctx, matched);
+    return stackVersions.filter(isPublicReadyVersion).map((version) => ({
+      publicId: version.publicId,
+      versionNumber: normalizeVersionNumber(version),
+      isLatest: version.supersededByVideoId === undefined,
+    }));
   },
 });
 
@@ -855,6 +919,25 @@ export const setVisibility = mutation({
     for (const version of versions) {
       if (version.visibility !== args.visibility) {
         await ctx.db.patch(version._id, { visibility: args.visibility });
+      }
+    }
+  },
+});
+
+export const setPublicVersionBrowsing = mutation({
+  args: {
+    videoId: v.id("videos"),
+    enabled: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    const { video } = await requireVideoAccess(ctx, args.videoId, "member");
+
+    // Like visibility, version browsing is a property of the whole video. Keep it
+    // consistent across every version in the stack.
+    const { versions } = await getStackVersions(ctx, video);
+    for (const version of versions) {
+      if (publicVersionBrowsingEnabled(version) !== args.enabled) {
+        await ctx.db.patch(version._id, { allowPublicVersionBrowsing: args.enabled });
       }
     }
   },

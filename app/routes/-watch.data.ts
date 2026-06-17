@@ -7,6 +7,9 @@ export function getWatchEssentialSpecs(params: { publicId: string }) {
     makeRouteQuerySpec(api.videos.getByPublicId, {
       publicId: params.publicId,
     }),
+    makeRouteQuerySpec(api.videos.listPublicVersions, {
+      publicId: params.publicId,
+    }),
     makeRouteQuerySpec(api.comments.getThreadedForPublic, {
       publicId: params.publicId,
     }),
@@ -18,11 +21,15 @@ export function useWatchData(params: { publicId: string }) {
     publicId: params.publicId,
   });
 
+  const versions = useQuery(api.videos.listPublicVersions, {
+    publicId: params.publicId,
+  });
+
   const comments = useQuery(api.comments.getThreadedForPublic, {
     publicId: params.publicId,
   });
 
-  return { videoData, comments };
+  return { videoData, versions, comments };
 }
 
 export async function prewarmWatch(convex: ConvexReactClient, params: { publicId: string }) {

@@ -1,28 +1,39 @@
 import { useAction, useMutation } from "convex/react";
 import { api } from "@convex/_generated/api";
-import { Link, useParams } from "@tanstack/react-router";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useUser } from "@clerk/tanstack-react-start";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { VideoPlayer, type VideoPlayerHandle } from "@/components/video-player/VideoPlayer";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { CommentText } from "@/components/comments/CommentText";
 import { triggerDownload } from "@/lib/download";
+import { watchPath } from "@/lib/routes";
 import { formatDuration, formatTimestamp, formatRelativeTime } from "@/lib/utils";
-import { AlertCircle, MessageSquare, Clock, Download, X } from "lucide-react";
+import { AlertCircle, Layers3, MessageSquare, Clock, Download, X } from "lucide-react";
 import { useWatchData } from "./-watch.data";
 
 export default function WatchPage() {
   const params = useParams({ strict: false });
   const publicId = params.publicId as string;
+  const navigate = useNavigate();
   const { user, isLoaded: isUserLoaded } = useUser();
 
   const createComment = useMutation(api.comments.createForPublic);
   const getPlaybackSession = useAction(api.videoActions.getPublicPlaybackSession);
   const getDownloadUrl = useAction(api.videoActions.getPublicDownloadUrl);
 
-  const { videoData, comments } = useWatchData({ publicId });
+  const { videoData, versions, comments } = useWatchData({ publicId });
   const [playbackSession, setPlaybackSession] = useState<{
     url: string;
     posterUrl: string;
@@ -208,6 +219,41 @@ export default function WatchPage() {
               <span className="hidden text-[#ccc] sm:inline">·</span>
               <span className="hidden font-mono sm:inline">{formatDuration(video.duration)}</span>
             </>
+          )}
+          {versions && versions.length > 1 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  aria-label={`Select version, currently v${video.versionNumber}`}
+                >
+                  <Layers3 className="h-4 w-4" />
+                  <span className="hidden sm:inline">v{video.versionNumber}</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-44">
+                <DropdownMenuLabel>Versions</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuRadioGroup value={video.publicId}>
+                  {versions.map((version) => (
+                    <DropdownMenuRadioItem
+                      key={version.publicId}
+                      value={version.publicId}
+                      onSelect={() => {
+                        if (version.publicId !== video.publicId) {
+                          void navigate({ to: watchPath(version.publicId) });
+                        }
+                      }}
+                    >
+                      <span className="font-bold">v{version.versionNumber}</span>
+                      {version.isLatest && <span className="ml-2 text-xs text-[#888]">Latest</span>}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
           <Button
             variant="outline"

@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Copy, Check, Plus, Trash2, Eye, Lock, ExternalLink, Globe } from "lucide-react";
+import { Copy, Check, Plus, Trash2, Eye, Lock, ExternalLink, Globe, Layers3 } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,9 +36,11 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
   const createShareLink = useMutation(api.shareLinks.create);
   const deleteShareLink = useMutation(api.shareLinks.remove);
   const setVisibility = useMutation(api.videos.setVisibility);
+  const setVersionBrowsing = useMutation(api.videos.setPublicVersionBrowsing);
 
   const [isCreating, setIsCreating] = useState(false);
   const [isUpdatingVisibility, setIsUpdatingVisibility] = useState(false);
+  const [isUpdatingVersionBrowsing, setIsUpdatingVersionBrowsing] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [newLinkOptions, setNewLinkOptions] = useState({
     expiresInDays: undefined as number | undefined,
@@ -74,6 +76,20 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
       console.error("Failed to update visibility:", error);
     } finally {
       setIsUpdatingVisibility(false);
+    }
+  };
+
+  const versionBrowsingEnabled = video?.allowPublicVersionBrowsing !== false;
+
+  const handleSetVersionBrowsing = async (enabled: boolean) => {
+    if (!video || isUpdatingVersionBrowsing || versionBrowsingEnabled === enabled) return;
+    setIsUpdatingVersionBrowsing(true);
+    try {
+      await setVersionBrowsing({ videoId, enabled });
+    } catch (error) {
+      console.error("Failed to update version browsing:", error);
+    } finally {
+      setIsUpdatingVersionBrowsing(false);
     }
   };
 
@@ -173,6 +189,41 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
                 >
                   <ExternalLink className="mr-2 h-4 w-4" />
                   Open
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
+          {video?.visibility === "public" ? (
+            <div className="space-y-2 border-2 border-[#1a1a1a] bg-[#f0f0e8] p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h4 className="flex items-center gap-1.5 text-sm font-bold text-[#1a1a1a]">
+                    <Layers3 className="h-3.5 w-3.5" />
+                    Version browsing
+                  </h4>
+                  <p className="text-xs text-[#666]">
+                    Let viewers switch between versions. When off, only the latest version is shown.
+                  </p>
+                </div>
+                <Badge variant={versionBrowsingEnabled ? "success" : "secondary"}>
+                  {versionBrowsingEnabled ? "On" : "Off"}
+                </Badge>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  variant={versionBrowsingEnabled ? "default" : "outline"}
+                  disabled={isUpdatingVersionBrowsing || video === undefined}
+                  onClick={() => void handleSetVersionBrowsing(true)}
+                >
+                  On
+                </Button>
+                <Button
+                  variant={!versionBrowsingEnabled ? "default" : "outline"}
+                  disabled={isUpdatingVersionBrowsing || video === undefined}
+                  onClick={() => void handleSetVersionBrowsing(false)}
+                >
+                  Off
                 </Button>
               </div>
             </div>
