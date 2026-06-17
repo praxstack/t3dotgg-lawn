@@ -18,6 +18,12 @@ export function getProjectEssentialSpecs(params: {
     makeRouteQuerySpec(api.projects.get, {
       projectId: params.projectId,
     }),
+    makeRouteQuerySpec(api.projects.listChildren, {
+      projectId: params.projectId,
+    }),
+    makeRouteQuerySpec(api.projects.breadcrumb, {
+      projectId: params.projectId,
+    }),
     makeRouteQuerySpec(api.videos.list, {
       projectId: params.projectId,
     }),
@@ -42,6 +48,14 @@ export function useProjectData(params: {
     api.videos.list,
     resolvedProjectId ? { projectId: resolvedProjectId } : "skip",
   );
+  const childFolders = useQuery(
+    api.projects.listChildren,
+    resolvedProjectId ? { projectId: resolvedProjectId } : "skip",
+  );
+  const breadcrumb = useQuery(
+    api.projects.breadcrumb,
+    resolvedProjectId ? { projectId: resolvedProjectId } : "skip",
+  );
 
   return {
     context,
@@ -49,6 +63,8 @@ export function useProjectData(params: {
     resolvedTeamSlug,
     project,
     videos,
+    childFolders,
+    breadcrumb,
   };
 }
 

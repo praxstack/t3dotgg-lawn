@@ -13,6 +13,7 @@ import { prewarmProject } from "./-project.data";
 import { useDashboardIndexData } from "./-index.data";
 import { Id } from "@convex/_generated/dataModel";
 import { DashboardHeader } from "@/components/DashboardHeader";
+import { formatProjectMeta } from "@/components/projects/ProjectCard";
 
 export const Route = createFileRoute("/dashboard/")({
   component: DashboardPage,
@@ -24,6 +25,7 @@ type DashboardProjectCardProps = {
     _id: Id<"projects">;
     name: string;
     videoCount: number;
+    subfolderCount: number;
   };
   onOpen: () => void;
 };
@@ -72,7 +74,7 @@ function DashboardProjectCard({
         <div className="flex-1 min-w-0">
           <CardTitle className="text-base truncate">{project.name}</CardTitle>
           <CardDescription className="mt-1">
-            {project.videoCount} video{project.videoCount !== 1 ? "s" : ""}
+            {formatProjectMeta(project.videoCount, project.subfolderCount)}
           </CardDescription>
         </div>
       </CardHeader>

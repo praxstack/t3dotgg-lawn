@@ -31,7 +31,13 @@ test("dashboard route data contracts expose expected essential queries", () => {
 
   assert.deepEqual(
     names(getProjectEssentialSpecs({ teamSlug, projectId })),
-    ["projects:get", "videos:list", "workspace:resolveContext"],
+    [
+      "projects:breadcrumb",
+      "projects:get",
+      "projects:listChildren",
+      "videos:list",
+      "workspace:resolveContext",
+    ],
   );
 
   assert.deepEqual(

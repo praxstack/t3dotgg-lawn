@@ -39,10 +39,10 @@ async function generatePublicId(ctx: MutationCtx) {
   );
 }
 
-async function deleteShareAccessGrantsForLink(
+export async function deleteShareAccessGrantsForLink(
   ctx: MutationCtx,
   linkId: Id<"shareLinks">,
-) {
+): Promise<number> {
   const grants = await ctx.db
     .query("shareAccessGrants")
     .withIndex("by_share_link", (q) => q.eq("shareLinkId", linkId))
@@ -51,6 +51,45 @@ async function deleteShareAccessGrantsForLink(
   for (const grant of grants) {
     await ctx.db.delete(grant._id);
   }
+
+  return grants.length;
+}
+
+/**
+ * Deletes a video and everything that depends on it (comments, share links and
+ * their access grants). Returns the number of documents deleted so callers that
+ * delete many videos in one transaction (e.g. the folder subtree cascade) can
+ * budget against Convex's per-transaction limits.
+ */
+export async function deleteVideoAndDependents(
+  ctx: MutationCtx,
+  videoId: Id<"videos">,
+): Promise<number> {
+  let deleted = 0;
+
+  const comments = await ctx.db
+    .query("comments")
+    .withIndex("by_video", (q) => q.eq("videoId", videoId))
+    .collect();
+  for (const comment of comments) {
+    await ctx.db.delete(comment._id);
+    deleted++;
+  }
+
+  const shareLinks = await ctx.db
+    .query("shareLinks")
+    .withIndex("by_video", (q) => q.eq("videoId", videoId))
+    .collect();
+  for (const link of shareLinks) {
+    deleted += await deleteShareAccessGrantsForLink(ctx, link._id);
+    await ctx.db.delete(link._id);
+    deleted++;
+  }
+
+  await ctx.db.delete(videoId);
+  deleted++;
+
+  return deleted;
 }
 
 export const create = mutation({
@@ -305,25 +344,7 @@ export const remove = mutation({
   args: { videoId: v.id("videos") },
   handler: async (ctx, args) => {
     await requireVideoAccess(ctx, args.videoId, "admin");
-
-    const comments = await ctx.db
-      .query("comments")
-      .withIndex("by_video", (q) => q.eq("videoId", args.videoId))
-      .collect();
-    for (const comment of comments) {
-      await ctx.db.delete(comment._id);
-    }
-
-    const shareLinks = await ctx.db
-      .query("shareLinks")
-      .withIndex("by_video", (q) => q.eq("videoId", args.videoId))
-      .collect();
-    for (const link of shareLinks) {
-      await deleteShareAccessGrantsForLink(ctx, link._id);
-      await ctx.db.delete(link._id);
-    }
-
-    await ctx.db.delete(args.videoId);
+    await deleteVideoAndDependents(ctx, args.videoId);
   },
 });
 

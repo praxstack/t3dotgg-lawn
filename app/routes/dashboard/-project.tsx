@@ -17,6 +17,7 @@ import {
   Download,
   MessageSquare,
   Eye,
+  FolderPlus,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -24,9 +25,21 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Id } from "@convex/_generated/dataModel";
 import { cn } from "@/lib/utils";
-import { teamHomePath, videoPath } from "@/lib/routes";
+import { projectPath, teamHomePath, videoPath } from "@/lib/routes";
+import { ProjectCard } from "@/components/projects/ProjectCard";
+import { MoveProjectDialog } from "@/components/projects/MoveProjectDialog";
 import { prefetchHlsRuntime, prefetchMuxPlaybackManifest } from "@/lib/muxPlayback";
 import { useRoutePrewarmIntent } from "@/lib/useRoutePrewarmIntent";
 import {
@@ -128,8 +141,15 @@ export default function ProjectPage({
   const pathname = useLocation().pathname;
   const convex = useConvex();
 
-  const { context, resolvedProjectId, resolvedTeamSlug, project, videos } =
-    useProjectData({ teamSlug, projectId });
+  const {
+    context,
+    resolvedProjectId,
+    resolvedTeamSlug,
+    project,
+    videos,
+    childFolders,
+    breadcrumb,
+  } = useProjectData({ teamSlug, projectId });
   const projectPresenceCounts = useQuery(
     api.videoPresence.listProjectOnlineCounts,
     resolvedProjectId ? { projectId: resolvedProjectId } : "skip",
@@ -138,10 +158,21 @@ export default function ProjectPage({
   const deleteVideo = useMutation(api.videos.remove);
   const updateVideoWorkflowStatus = useMutation(api.videos.updateWorkflowStatus);
   const getDownloadUrl = useAction(api.videoActions.getDownloadUrl);
+  const createFolder = useMutation(api.projects.create);
+  const deleteFolder = useMutation(api.projects.remove);
+
+  const teamId = context?.team?._id;
 
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [shareToast, setShareToast] = useState<ShareToastState | null>(null);
   const shareToastTimeoutRef = useRef<number | null>(null);
+  const [createFolderOpen, setCreateFolderOpen] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+  const [moveTarget, setMoveTarget] = useState<{
+    _id: Id<"projects">;
+    name: string;
+  } | null>(null);
 
   const shouldCanonicalize =
     !!context && !context.isCanonical && pathname !== context.canonicalPath;
@@ -184,6 +215,44 @@ export default function ProjectPage({
       await deleteVideo({ videoId });
     } catch (error) {
       console.error("Failed to delete video:", error);
+    }
+  };
+
+  const handleCreateFolder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newFolderName.trim() || !teamId || !resolvedProjectId) return;
+
+    setIsCreatingFolder(true);
+    try {
+      const newId = await createFolder({
+        teamId,
+        name: newFolderName.trim(),
+        parentId: resolvedProjectId,
+      });
+      setCreateFolderOpen(false);
+      setNewFolderName("");
+      navigate({ to: projectPath(resolvedTeamSlug, newId) });
+    } catch (error) {
+      console.error("Failed to create folder:", error);
+      window.alert(
+        error instanceof Error ? error.message : "Failed to create folder",
+      );
+    } finally {
+      setIsCreatingFolder(false);
+    }
+  };
+
+  const handleDeleteFolder = async (childId: Id<"projects">) => {
+    if (
+      !confirm(
+        "Delete this folder and everything inside it (sub-folders and videos)? This can't be undone.",
+      )
+    )
+      return;
+    try {
+      await deleteFolder({ projectId: childId });
+    } catch (error) {
+      console.error("Failed to delete folder:", error);
     }
   };
 
@@ -269,6 +338,14 @@ export default function ProjectPage({
   }
 
   const canUpload = project?.role !== "viewer";
+  const hasChildFolders = (childFolders?.length ?? 0) > 0;
+  const hasVideos = (videos?.length ?? 0) > 0;
+  const showEmptyDropzone = !isLoadingData && !hasVideos && !hasChildFolders;
+  const breadcrumbSegments =
+    breadcrumb ??
+    (project
+      ? [{ _id: project._id, name: project.name }]
+      : [{ _id: projectId, name: " " }]);
 
   return (
     <div className="h-full flex flex-col">
@@ -279,12 +356,25 @@ export default function ProjectPage({
           href: teamHomePath(resolvedTeamSlug),
           prewarmIntentHandlers: prewarmTeamIntentHandlers,
         },
-        { label: project?.name ?? "\u00A0" }
+        ...breadcrumbSegments.map((segment, index) =>
+          index === breadcrumbSegments.length - 1
+            ? { label: segment.name }
+            : {
+                label: segment.name,
+                href: projectPath(resolvedTeamSlug, segment._id),
+              },
+        ),
       ]}>
         <div className={cn(
           "flex items-center gap-2 transition-opacity duration-300 flex-shrink-0",
           isLoadingData ? "opacity-0" : "opacity-100"
         )}>
+          {canUpload && (
+            <Button variant="outline" onClick={() => setCreateFolderOpen(true)}>
+              <FolderPlus className="sm:mr-1.5 h-4 w-4" />
+              <span className="hidden sm:inline">New folder</span>
+            </Button>
+          )}
           {/* View toggle */}
           <div className="flex items-center border-2 border-[#1a1a1a] p-0.5">
             <button
@@ -318,7 +408,34 @@ export default function ProjectPage({
 
       {/* Content */}
       <div className="flex-1 overflow-auto">
-        {!isLoadingData && videos.length === 0 ? (
+        {hasChildFolders && (
+          <div
+            className={cn(
+              "p-6 transition-opacity duration-300",
+              hasVideos ? "pb-0" : "",
+              isLoadingData ? "opacity-0" : "opacity-100",
+            )}
+          >
+            <h2 className="text-xs font-black uppercase tracking-wider text-[#888] mb-3">
+              Folders
+            </h2>
+            <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {childFolders?.map((child) => (
+                <ProjectCard
+                  key={child._id}
+                  teamSlug={resolvedTeamSlug}
+                  project={child}
+                  onOpen={() =>
+                    navigate({ to: projectPath(resolvedTeamSlug, child._id) })
+                  }
+                  onDelete={canUpload ? handleDeleteFolder : undefined}
+                  onMove={canUpload ? (p) => setMoveTarget(p) : undefined}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+        {showEmptyDropzone ? (
           <div className="h-full flex items-center justify-center p-6 animate-in fade-in duration-300">
             <DropZone
               onFilesSelected={handleFilesSelected}
@@ -635,6 +752,54 @@ export default function ProjectPage({
           </div>
         </div>
       ) : null}
+
+      <Dialog open={createFolderOpen} onOpenChange={setCreateFolderOpen}>
+        <DialogContent>
+          <form onSubmit={handleCreateFolder}>
+            <DialogHeader>
+              <DialogTitle>New folder</DialogTitle>
+              <DialogDescription>
+                Create a folder inside {project?.name ?? "this folder"} to
+                organize videos and sub-folders.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="py-4">
+              <Input
+                placeholder="Folder name"
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setCreateFolderOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={!newFolderName.trim() || isCreatingFolder}
+              >
+                {isCreatingFolder ? "Creating..." : "Create"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {teamId && (
+        <MoveProjectDialog
+          teamId={teamId}
+          project={moveTarget}
+          open={moveTarget !== null}
+          onOpenChange={(open) => {
+            if (!open) setMoveTarget(null);
+          }}
+        />
+      )}
     </div>
   );
 }

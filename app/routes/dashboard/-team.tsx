@@ -1,5 +1,5 @@
 
-import { useConvex, useMutation } from "convex/react";
+import { useMutation } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
@@ -20,100 +20,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Folder, Plus, MoreVertical, Trash2, Users, ArrowRight, CreditCard } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { Folder, Plus, Users, CreditCard } from "lucide-react";
 import { MemberInvite } from "@/components/teams/MemberInvite";
 import { cn } from "@/lib/utils";
 import { projectPath, teamSettingsPath } from "@/lib/routes";
 import { Id } from "@convex/_generated/dataModel";
-import { useRoutePrewarmIntent } from "@/lib/useRoutePrewarmIntent";
-import { prewarmProject } from "./-project.data";
+import { ProjectCard } from "@/components/projects/ProjectCard";
+import { MoveProjectDialog } from "@/components/projects/MoveProjectDialog";
 import { useTeamData } from "./-team.data";
 import { DashboardHeader } from "@/components/DashboardHeader";
-
-type TeamProjectCardProps = {
-  teamSlug: string;
-  project: {
-    _id: Id<"projects">;
-    name: string;
-    videoCount: number;
-  };
-  canCreateProject: boolean;
-  onOpen: () => void;
-  onDelete: (projectId: Id<"projects">) => void;
-};
-
-function TeamProjectCard({
-  teamSlug,
-  project,
-  canCreateProject,
-  onOpen,
-  onDelete,
-}: TeamProjectCardProps) {
-  const convex = useConvex();
-  const prewarmIntentHandlers = useRoutePrewarmIntent(() =>
-    prewarmProject(convex, {
-      teamSlug,
-      projectId: project._id,
-    }),
-  );
-
-  return (
-    <Card
-      className="group cursor-pointer hover:bg-[#e8e8e0] transition-colors"
-      onClick={onOpen}
-      {...prewarmIntentHandlers}
-    >
-      <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
-        <div className="flex-1 min-w-0">
-          <CardTitle className="text-base truncate">{project.name}</CardTitle>
-          <CardDescription className="mt-1">
-            {project.videoCount} video{project.videoCount !== 1 ? "s" : ""}
-          </CardDescription>
-        </div>
-        {canCreateProject && (
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              asChild
-              onClick={(e) => e.stopPropagation()}
-            >
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
-              >
-                <MoreVertical className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem
-                className="text-[#dc2626] focus:text-[#dc2626]"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDelete(project._id);
-                }}
-              >
-                <Trash2 className="mr-2 h-4 w-4" />
-                Delete
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-      </CardHeader>
-      <CardContent>
-        <div className="flex items-center justify-between text-sm text-[#888] group-hover:text-[#1a1a1a] transition-colors">
-          <span>Open project</span>
-          <ArrowRight className="h-4 w-4" />
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
 
 export default function TeamPage() {
   const params = useParams({ strict: false });
@@ -129,6 +44,10 @@ export default function TeamPage() {
   const [memberDialogOpen, setMemberDialogOpen] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [moveTarget, setMoveTarget] = useState<{
+    _id: Id<"projects">;
+    name: string;
+  } | null>(null);
 
   const shouldCanonicalize =
     !!context && !context.isCanonical && pathname !== context.canonicalPath;
@@ -175,7 +94,12 @@ export default function TeamPage() {
   };
 
   const handleDeleteProject = async (projectId: Id<"projects">) => {
-    if (!confirm("Are you sure you want to delete this project?")) return;
+    if (
+      !confirm(
+        "Delete this project and everything inside it (sub-folders and videos)? This can't be undone.",
+      )
+    )
+      return;
     try {
       await deleteProject({ projectId });
     } catch (error) {
@@ -290,15 +214,15 @@ export default function TeamPage() {
             isLoadingData ? "opacity-0" : "opacity-100"
           )}>
             {projects?.map((project) => (
-              <TeamProjectCard
+              <ProjectCard
                 key={project._id}
                 teamSlug={team.slug}
                 project={project}
-                canCreateProject={canCreateProject}
                 onOpen={() =>
                   navigate({ to: projectPath(team.slug, project._id) })
                 }
-                onDelete={handleDeleteProject}
+                onDelete={canCreateProject ? handleDeleteProject : undefined}
+                onMove={canCreateProject ? (p) => setMoveTarget(p) : undefined}
               />
             ))}
           </div>
@@ -346,6 +270,17 @@ export default function TeamPage() {
           teamId={team._id}
           open={memberDialogOpen}
           onOpenChange={setMemberDialogOpen}
+        />
+      )}
+
+      {team && (
+        <MoveProjectDialog
+          teamId={team._id}
+          project={moveTarget}
+          open={moveTarget !== null}
+          onOpenChange={(open) => {
+            if (!open) setMoveTarget(null);
+          }}
         />
       )}
     </div>
