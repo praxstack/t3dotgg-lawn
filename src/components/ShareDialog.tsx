@@ -190,32 +190,33 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
                 <h3 className="text-sm font-bold text-[#1a1a1a]">Version browsing</h3>
                 <p className="text-xs text-[#888]">Let viewers switch between versions.</p>
               </div>
-              <div className="flex shrink-0 border-2 border-[#1a1a1a]">
-                <button
-                  type="button"
-                  disabled={isUpdatingVersionBrowsing || video === undefined}
-                  onClick={() => void handleSetVersionBrowsing(true)}
+              <div className="flex shrink-0 items-center gap-2.5">
+                <span
                   className={cn(
-                    "px-3 py-1.5 text-sm font-bold transition-colors disabled:opacity-50",
-                    versionBrowsingEnabled
-                      ? "bg-[#1a1a1a] text-[#f0f0e8]"
-                      : "text-[#1a1a1a] hover:bg-[#e8e8e0]",
+                    "text-xs font-bold tracking-wide uppercase",
+                    versionBrowsingEnabled ? "text-[#2d5a2d]" : "text-[#888]",
                   )}
                 >
-                  On
-                </button>
+                  {versionBrowsingEnabled ? "On" : "Off"}
+                </span>
                 <button
                   type="button"
+                  role="switch"
+                  aria-checked={versionBrowsingEnabled}
+                  aria-label="Version browsing"
                   disabled={isUpdatingVersionBrowsing || video === undefined}
-                  onClick={() => void handleSetVersionBrowsing(false)}
+                  onClick={() => void handleSetVersionBrowsing(!versionBrowsingEnabled)}
                   className={cn(
-                    "border-l-2 border-[#1a1a1a] px-3 py-1.5 text-sm font-bold transition-colors disabled:opacity-50",
-                    !versionBrowsingEnabled
-                      ? "bg-[#1a1a1a] text-[#f0f0e8]"
-                      : "text-[#1a1a1a] hover:bg-[#e8e8e0]",
+                    "relative h-7 w-12 shrink-0 border-2 border-[#1a1a1a] transition-colors disabled:opacity-50",
+                    versionBrowsingEnabled ? "bg-[#2d5a2d]" : "bg-[#ccc]",
                   )}
                 >
-                  Off
+                  <span
+                    className={cn(
+                      "absolute top-1 h-4 w-4 border-2 border-[#1a1a1a] bg-[#f0f0e8] transition-all",
+                      versionBrowsingEnabled ? "left-[26px]" : "left-0.5",
+                    )}
+                  />
                 </button>
               </div>
             </div>
