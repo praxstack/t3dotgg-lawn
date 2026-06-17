@@ -589,15 +589,55 @@ export const listVersions = query({
   },
 });
 
+/**
+ * Resolves the video that should be served for a public `/watch/<publicId>` link.
+ *
+ * Each version in a stack is its own `videos` row with its own `publicId`, so the
+ * shared link can point at a version that is not the one that should currently
+ * play publicly — e.g. a freshly uploaded version that is still processing, or an
+ * older superseded cut. Marking the linked version private still disables the URL,
+ * but otherwise we serve the latest version of the stack that is both public and
+ * ready. This keeps a public video watchable while newer versions process and
+ * always surfaces the current cut, instead of returning "video unavailable".
+ */
+export async function resolvePublicVideo(
+  ctx: StackReadCtx,
+  publicId: string,
+): Promise<Doc<"videos"> | null> {
+  const matched = await ctx.db
+    .query("videos")
+    .withIndex("by_public_id", (q) => q.eq("publicId", publicId))
+    .unique();
+
+  if (!matched || matched.visibility !== "public") {
+    return null;
+  }
+
+  // Fall back to the matched row alone if the stack is somehow malformed, so a
+  // public viewer never hits an invariant error on a hot path.
+  let stackVersions: Doc<"videos">[] = [matched];
+  try {
+    const { oldestToNewest } = await getOrderedStackVersions(ctx, matched);
+    stackVersions = oldestToNewest;
+  } catch {
+    stackVersions = [matched];
+  }
+
+  for (let index = stackVersions.length - 1; index >= 0; index--) {
+    const candidate = stackVersions[index];
+    if (candidate.visibility === "public" && candidate.status === "ready") {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
 export const getByPublicId = query({
   args: { publicId: v.string() },
   handler: async (ctx, args) => {
-    const video = await ctx.db
-      .query("videos")
-      .withIndex("by_public_id", (q) => q.eq("publicId", args.publicId))
-      .unique();
-
-    if (!video || video.visibility !== "public" || video.status !== "ready") {
+    const video = await resolvePublicVideo(ctx, args.publicId);
+    if (!video) {
       return null;
     }
 
@@ -620,12 +660,8 @@ export const getByPublicId = query({
 export const getByPublicIdForDownload = query({
   args: { publicId: v.string() },
   handler: async (ctx, args) => {
-    const video = await ctx.db
-      .query("videos")
-      .withIndex("by_public_id", (q) => q.eq("publicId", args.publicId))
-      .unique();
-
-    if (!video || video.visibility !== "public") {
+    const video = await resolvePublicVideo(ctx, args.publicId);
+    if (!video) {
       return null;
     }
 
@@ -771,11 +807,17 @@ export const setVisibility = mutation({
     visibility: visibilityValidator,
   },
   handler: async (ctx, args) => {
-    await requireVideoAccess(ctx, args.videoId, "member");
+    const { video } = await requireVideoAccess(ctx, args.videoId, "member");
 
-    await ctx.db.patch(args.videoId, {
-      visibility: args.visibility,
-    });
+    // Visibility is a property of the whole video, not a single cut. Apply it to
+    // every version in the stack so the public/private state can't drift between
+    // versions (each version carries its own `visibility` row).
+    const { versions } = await getStackVersions(ctx, video);
+    for (const version of versions) {
+      if (version.visibility !== args.visibility) {
+        await ctx.db.patch(version._id, { visibility: args.visibility });
+      }
+    }
   },
 });
 
