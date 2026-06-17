@@ -66,6 +66,10 @@ export default defineSchema({
     description: v.optional(v.string()),
     visibility: v.union(v.literal("public"), v.literal("private")),
     publicId: v.string(),
+    // When false, public viewers only ever see the latest ready version and the
+    // version switcher is hidden. Unset/true means viewers can browse versions.
+    // Kept consistent across every version in a stack (see setPublicVersionBrowsing).
+    allowPublicVersionBrowsing: v.optional(v.boolean()),
     // Mux video references
     muxUploadId: v.optional(v.string()),
     muxAssetId: v.optional(v.string()),

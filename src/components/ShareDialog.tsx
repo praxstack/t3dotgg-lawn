@@ -22,7 +22,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { formatRelativeTime } from "@/lib/utils";
+import { cn, formatRelativeTime } from "@/lib/utils";
 
 interface ShareDialogProps {
   videoId: Id<"videos">;
@@ -36,9 +36,11 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
   const createShareLink = useMutation(api.shareLinks.create);
   const deleteShareLink = useMutation(api.shareLinks.remove);
   const setVisibility = useMutation(api.videos.setVisibility);
+  const setVersionBrowsing = useMutation(api.videos.setPublicVersionBrowsing);
 
   const [isCreating, setIsCreating] = useState(false);
   const [isUpdatingVisibility, setIsUpdatingVisibility] = useState(false);
+  const [isUpdatingVersionBrowsing, setIsUpdatingVersionBrowsing] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [newLinkOptions, setNewLinkOptions] = useState({
     expiresInDays: undefined as number | undefined,
@@ -77,6 +79,20 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
     }
   };
 
+  const versionBrowsingEnabled = video?.allowPublicVersionBrowsing !== false;
+
+  const handleSetVersionBrowsing = async (enabled: boolean) => {
+    if (!video || isUpdatingVersionBrowsing || versionBrowsingEnabled === enabled) return;
+    setIsUpdatingVersionBrowsing(true);
+    try {
+      await setVersionBrowsing({ videoId, enabled });
+    } catch (error) {
+      console.error("Failed to update version browsing:", error);
+    } finally {
+      setIsUpdatingVersionBrowsing(false);
+    }
+  };
+
   const handleCopyLink = (token: string) => {
     const url = `${window.location.origin}/share/${token}`;
     navigator.clipboard.writeText(url);
@@ -105,7 +121,7 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-h-[85vh] max-w-lg overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Share video</DialogTitle>
           <DialogDescription>
@@ -113,19 +129,8 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3 border-2 border-[#1a1a1a] bg-[#e8e8e0] p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-bold text-[#1a1a1a]">Visibility</h3>
-              <p className="text-xs text-[#666]">
-                Private disables the public URL. Restricted share links can still be used.
-              </p>
-            </div>
-            <Badge variant={video?.visibility === "public" ? "success" : "secondary"}>
-              {video?.visibility === "public" ? "Public" : "Private"}
-            </Badge>
-          </div>
-
+        {/* Visibility */}
+        <div className="space-y-2">
           <div className="grid grid-cols-2 gap-2">
             <Button
               variant={video?.visibility === "public" ? "default" : "outline"}
@@ -144,57 +149,105 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
               Private
             </Button>
           </div>
-
-          {publicWatchPath ? (
-            <div className="space-y-2 border-2 border-[#1a1a1a] bg-[#f0f0e8] p-3">
-              <div className="text-xs text-[#666]">Public URL</div>
-              <code className="block truncate bg-[#e8e8e0] px-2 py-1 font-mono text-sm">
-                {publicWatchPath}
-              </code>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  className="flex-1"
-                  onClick={handleCopyPublicLink}
-                  disabled={video?.visibility !== "public"}
-                >
-                  {copiedId === "public" ? (
-                    <Check className="mr-2 h-4 w-4" />
-                  ) : (
-                    <Copy className="mr-2 h-4 w-4" />
-                  )}
-                  Copy URL
-                </Button>
-                <Button
-                  variant="outline"
-                  className="flex-1"
-                  disabled={video?.visibility !== "public"}
-                  onClick={() => window.open(publicWatchPath, "_blank")}
-                >
-                  <ExternalLink className="mr-2 h-4 w-4" />
-                  Open
-                </Button>
-              </div>
-            </div>
-          ) : null}
+          <p className="text-xs text-[#888]">
+            Private disables the public URL. Restricted share links still work.
+          </p>
         </div>
 
-        <div className="space-y-4 border-2 border-[#1a1a1a] bg-[#e8e8e0] p-4">
-          <h3 className="text-sm font-bold text-[#1a1a1a]">Create restricted share link</h3>
+        {/* Public URL + version browsing */}
+        {video?.visibility === "public" ? (
+          <div className="space-y-3">
+            {publicWatchPath ? (
+              <div className="flex items-center gap-2">
+                <code className="min-w-0 flex-1 truncate border-2 border-[#1a1a1a] bg-[#e8e8e0] px-3 py-2 font-mono text-sm">
+                  {publicWatchPath}
+                </code>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={handleCopyPublicLink}
+                  aria-label="Copy public URL"
+                >
+                  {copiedId === "public" ? (
+                    <Check className="h-4 w-4" />
+                  ) : (
+                    <Copy className="h-4 w-4" />
+                  )}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => window.open(publicWatchPath, "_blank")}
+                  aria-label="Open public URL"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                </Button>
+              </div>
+            ) : null}
 
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h3 className="text-sm font-bold text-[#1a1a1a]">Version browsing</h3>
+                <p className="text-xs text-[#888]">Let viewers switch between versions.</p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2.5">
+                <span
+                  className={cn(
+                    "text-xs font-bold tracking-wide uppercase",
+                    versionBrowsingEnabled ? "text-[#2d5a2d]" : "text-[#888]",
+                  )}
+                >
+                  {versionBrowsingEnabled ? "On" : "Off"}
+                </span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={versionBrowsingEnabled}
+                  aria-label="Version browsing"
+                  disabled={isUpdatingVersionBrowsing || video === undefined}
+                  onClick={() => void handleSetVersionBrowsing(!versionBrowsingEnabled)}
+                  className={cn(
+                    "relative h-7 w-12 shrink-0 border-2 border-[#1a1a1a] transition-colors disabled:opacity-50",
+                    versionBrowsingEnabled ? "bg-[#2d5a2d]" : "bg-[#ccc]",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "absolute top-1 h-4 w-4 border-2 border-[#1a1a1a] bg-[#f0f0e8] transition-all",
+                      versionBrowsingEnabled ? "left-[26px]" : "left-0.5",
+                    )}
+                  />
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        <Separator />
+
+        {/* Restricted links */}
+        <div className="space-y-3">
           <div>
-            <label className="text-sm text-[#888]">Expiration</label>
+            <h3 className="text-sm font-bold text-[#1a1a1a]">Restricted links</h3>
+            <p className="text-xs text-[#888]">
+              Time-limited, optionally password-protected links.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="mt-1 w-full justify-between">
-                  {newLinkOptions.expiresInDays ? `${newLinkOptions.expiresInDays} days` : "Never"}
+                <Button variant="outline" className="w-full justify-between">
+                  {newLinkOptions.expiresInDays
+                    ? `${newLinkOptions.expiresInDays} days`
+                    : "Never expires"}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent>
                 <DropdownMenuItem
                   onClick={() => setNewLinkOptions((o) => ({ ...o, expiresInDays: undefined }))}
                 >
-                  Never
+                  Never expires
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => setNewLinkOptions((o) => ({ ...o, expiresInDays: 1 }))}
@@ -213,13 +266,9 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-          </div>
-
-          <div>
-            <label className="text-sm text-[#888]">Password (optional)</label>
             <Input
               type="password"
-              placeholder="Leave empty for no password"
+              placeholder="Password (optional)"
               value={newLinkOptions.password || ""}
               onChange={(e) =>
                 setNewLinkOptions((o) => ({
@@ -227,31 +276,22 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
                   password: e.target.value || undefined,
                 }))
               }
-              className="mt-1"
             />
           </div>
 
           <Button onClick={handleCreateLink} disabled={isCreating} className="w-full">
             <Plus className="mr-2 h-4 w-4" />
-            {isCreating ? "Creating..." : "Create restricted link"}
+            {isCreating ? "Creating..." : "Create link"}
           </Button>
-        </div>
 
-        <Separator />
-
-        <div className="space-y-2">
-          <h3 className="text-sm font-bold text-[#1a1a1a]">Restricted links</h3>
           {shareLinks === undefined ? (
             <p className="text-sm text-[#888]">Loading...</p>
           ) : shareLinks.length === 0 ? (
             <p className="text-sm text-[#888]">No share links yet</p>
           ) : (
-            <div className="space-y-2">
+            <div className="max-h-64 divide-y-2 divide-[#1a1a1a] overflow-y-auto border-2 border-[#1a1a1a]">
               {shareLinks.map((link) => (
-                <div
-                  key={link._id}
-                  className="flex items-center justify-between border-2 border-[#1a1a1a] p-3"
-                >
+                <div key={link._id} className="flex items-center justify-between gap-2 p-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <code className="max-w-[200px] truncate bg-[#e8e8e0] px-2 py-0.5 font-mono text-sm">
@@ -275,7 +315,7 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
                       ) : null}
                     </div>
                   </div>
-                  <div className="flex items-center gap-1">
+                  <div className="flex shrink-0 items-center gap-1">
                     <Button variant="ghost" size="icon" onClick={() => handleCopyLink(link.token)}>
                       {copiedId === link.token ? (
                         <Check className="h-4 w-4 text-[#2d5a2d]" />

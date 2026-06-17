@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { mutation, query, MutationCtx, QueryCtx } from "./_generated/server";
 import { identityAvatarUrl, identityName, requireVideoAccess, requireUser } from "./auth";
 import { resolveActiveShareGrant } from "./shareAccess";
+import { resolvePublicVideo } from "./videos";
 
 function toThreadedComments<
   T extends { _id: string; parentId?: string; timestampSeconds: number; _creationTime: number },
@@ -41,16 +42,9 @@ function toPublicCommentPayload(comment: {
 }
 
 async function getPublicVideoByPublicId(ctx: QueryCtx | MutationCtx, publicId: string) {
-  const video = await ctx.db
-    .query("videos")
-    .withIndex("by_public_id", (q) => q.eq("publicId", publicId))
-    .unique();
-
-  if (!video || video.visibility !== "public" || video.status !== "ready") {
-    return null;
-  }
-
-  return video;
+  // Resolve to the same version the public watch page serves so comments are
+  // read from and written to the cut the viewer is actually watching.
+  return await resolvePublicVideo(ctx, publicId);
 }
 
 export const list = query({
