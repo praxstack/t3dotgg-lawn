@@ -63,6 +63,7 @@ export default function VideoPage() {
   });
   const updateVideo = useMutation(api.videos.update);
   const updateVideoWorkflowStatus = useMutation(api.videos.updateWorkflowStatus);
+  const checkMuxAssetStatus = useAction(api.videoActions.checkMuxAssetStatus);
   const getPlaybackSession = useAction(api.videoActions.getPlaybackSession);
   const getOriginalPlaybackUrl = useAction(api.videoActions.getOriginalPlaybackUrl);
   const getDownloadUrl = useAction(api.videoActions.getDownloadUrl);
@@ -115,6 +116,45 @@ export default function VideoPage() {
       navigate({ to: context.canonicalPath, replace: true });
     }
   }, [shouldCanonicalize, context, navigate]);
+
+  useEffect(() => {
+    if (
+      !resolvedVideoId ||
+      video?.status !== "processing" ||
+      !video.muxAssetId
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    let timeoutId: number | undefined;
+
+    const pollMuxStatus = async () => {
+      try {
+        await checkMuxAssetStatus({ videoId: resolvedVideoId });
+      } catch (error) {
+        console.warn("Failed to check Mux asset status", error);
+      }
+
+      if (!cancelled) {
+        timeoutId = window.setTimeout(pollMuxStatus, 10_000);
+      }
+    };
+
+    void pollMuxStatus();
+
+    return () => {
+      cancelled = true;
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [
+    checkMuxAssetStatus,
+    resolvedVideoId,
+    video?.muxAssetId,
+    video?.status,
+  ]);
 
   useEffect(() => {
     if (!resolvedVideoId || !isPlayable) {
@@ -386,10 +426,10 @@ export default function VideoPage() {
         {/* Video player area — full black, Frame.io style */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-black">
           {video.status === "processing" && isUsingOriginalFallback && activePlaybackUrl ? (
-            <div className="flex-shrink-0 flex items-center gap-2 bg-[#1a1a1a] px-4 py-2 text-sm text-white">
-              <span className="inline-flex h-2.5 w-2.5 animate-pulse rounded-full bg-[#2d5a2d]" />
+            <div className="flex-shrink-0 flex items-center gap-2 bg-[#171c17] px-4 py-2 text-sm text-[#e7ede4]">
+              <span className="inline-flex h-2.5 w-2.5 animate-pulse rounded-full bg-[#7cb87c]" />
               <span className="font-semibold">Original playback active.</span>
-              <span className="text-white/60">720p stream is still encoding.</span>
+              <span className="text-[#aeb9ac]">720p stream is still encoding.</span>
             </div>
           ) : null}
 

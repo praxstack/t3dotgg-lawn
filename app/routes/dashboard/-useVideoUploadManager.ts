@@ -3,6 +3,17 @@ import { useCallback, useState } from "react";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
 import type { UploadStatus } from "@/components/upload/UploadProgress";
+import { buildFileFingerprint, isFileTooLarge, formatMaxUploadSize } from "@/lib/uploadLimits";
+import {
+  deleteUploadResumeSession,
+  findUploadResumeSessionByFingerprint,
+  loadUploadResumeSession,
+} from "@/lib/uploadResumeDb";
+import {
+  isProcessingRetryError,
+  isResumableUploadError,
+  uploadVideoFile,
+} from "@/lib/videoUpload";
 
 export interface ManagedUploadItem {
   id: string;
@@ -15,6 +26,8 @@ export interface ManagedUploadItem {
   bytesPerSecond?: number;
   estimatedSecondsRemaining?: number | null;
   abortController?: AbortController;
+  resuming?: boolean;
+  canRetryProcessing?: boolean;
 }
 
 function createUploadId() {
@@ -26,10 +39,20 @@ function createUploadId() {
 
 export function useVideoUploadManager() {
   const createVideo = useMutation(api.videos.create);
-  const getUploadUrl = useAction(api.videoActions.getUploadUrl);
+  const initiateVideoUpload = useAction(api.videoActions.initiateVideoUpload);
+  const signUploadParts = useAction(api.videoActions.signUploadParts);
+  const completeMultipartUpload = useAction(api.videoActions.completeMultipartUpload);
   const markUploadComplete = useAction(api.videoActions.markUploadComplete);
   const markUploadFailed = useAction(api.videoActions.markUploadFailed);
+  const abortVideoUpload = useAction(api.videoActions.abortVideoUpload);
   const [uploads, setUploads] = useState<ManagedUploadItem[]>([]);
+
+  const uploadActions = {
+    initiateVideoUpload,
+    signUploadParts,
+    completeMultipartUpload,
+    markUploadComplete,
+  };
 
   const uploadFilesToProject = useCallback(
     async (projectId: Id<"projects">, files: File[]) => {
@@ -37,6 +60,28 @@ export function useVideoUploadManager() {
         const uploadId = createUploadId();
         const title = file.name.replace(/\.[^/.]+$/, "");
         const abortController = new AbortController();
+
+        if (isFileTooLarge(file.size)) {
+          setUploads((prev) => [
+            ...prev,
+            {
+              id: uploadId,
+              projectId,
+              file,
+              progress: 0,
+              status: "error",
+              error: `Video file is too large. Maximum size is ${formatMaxUploadSize()}.`,
+              abortController,
+            },
+          ]);
+          continue;
+        }
+
+        const fingerprint = await buildFileFingerprint(file);
+        const existingResume = await findUploadResumeSessionByFingerprint(
+          fingerprint,
+          projectId,
+        );
 
         setUploads((prev) => [
           ...prev,
@@ -47,109 +92,97 @@ export function useVideoUploadManager() {
             progress: 0,
             status: "pending",
             abortController,
+            resuming: Boolean(existingResume),
           },
         ]);
 
-        let createdVideoId: Id<"videos"> | undefined;
+        let createdVideoId: Id<"videos"> | undefined = existingResume?.videoId;
 
         try {
-          createdVideoId = await createVideo({
-            projectId,
-            title,
-            fileSize: file.size,
-            contentType: file.type || "video/mp4",
-          });
+          if (!createdVideoId) {
+            createdVideoId = await createVideo({
+              projectId,
+              title,
+              fileSize: file.size,
+              contentType: file.type || "video/mp4",
+            });
+          }
+
+          let resumeSession =
+            (await loadUploadResumeSession(createdVideoId)) ?? existingResume;
+
+          const runUpload = async () => {
+            setUploads((prev) =>
+              prev.map((upload) =>
+                upload.id === uploadId
+                  ? {
+                      ...upload,
+                      videoId: createdVideoId,
+                      status: "uploading",
+                      resuming: Boolean(resumeSession),
+                    }
+                  : upload,
+              ),
+            );
+
+            await uploadVideoFile({
+              file,
+              projectId,
+              videoId: createdVideoId!,
+              actions: uploadActions,
+              signal: abortController.signal,
+              resumeSession,
+              fileFingerprint: fingerprint,
+              onResumingChange: (resuming) => {
+                setUploads((prev) =>
+                  prev.map((upload) =>
+                    upload.id === uploadId ? { ...upload, resuming } : upload,
+                  ),
+                );
+              },
+              onProgress: (update) => {
+                setUploads((prev) =>
+                  prev.map((upload) =>
+                    upload.id === uploadId
+                      ? {
+                          ...upload,
+                          progress: update.progress,
+                          bytesPerSecond: update.bytesPerSecond,
+                          estimatedSecondsRemaining: update.estimatedSecondsRemaining,
+                        }
+                      : upload,
+                  ),
+                );
+              },
+            });
+          };
+
+          try {
+            await runUpload();
+          } catch (error) {
+            const staleResumeVideo =
+              Boolean(existingResume) &&
+              error instanceof Error &&
+              error.message.includes("Video not found");
+            if (!staleResumeVideo) {
+              throw error;
+            }
+
+            await deleteUploadResumeSession(createdVideoId);
+            createdVideoId = await createVideo({
+              projectId,
+              title,
+              fileSize: file.size,
+              contentType: file.type || "video/mp4",
+            });
+            resumeSession = undefined;
+            await runUpload();
+          }
 
           setUploads((prev) =>
             prev.map((upload) =>
               upload.id === uploadId
-                ? { ...upload, videoId: createdVideoId, status: "uploading" }
-                : upload,
-            ),
-          );
-
-          const { url } = await getUploadUrl({
-            videoId: createdVideoId,
-            filename: file.name,
-            fileSize: file.size,
-            contentType: file.type || "video/mp4",
-          });
-
-          await new Promise<void>((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            let lastTime = Date.now();
-            let lastLoaded = 0;
-            const recentSpeeds: number[] = [];
-
-            xhr.upload.addEventListener("progress", (event) => {
-              if (!event.lengthComputable) return;
-
-              const percentage = Math.round((event.loaded / event.total) * 100);
-              const now = Date.now();
-              const timeDelta = (now - lastTime) / 1000;
-              const bytesDelta = event.loaded - lastLoaded;
-
-              if (timeDelta > 0.1) {
-                const speed = bytesDelta / timeDelta;
-                recentSpeeds.push(speed);
-                if (recentSpeeds.length > 5) recentSpeeds.shift();
-                lastTime = now;
-                lastLoaded = event.loaded;
-              }
-
-              const avgSpeed =
-                recentSpeeds.length > 0
-                  ? recentSpeeds.reduce((sum, speed) => sum + speed, 0) /
-                    recentSpeeds.length
-                  : 0;
-              const remaining = event.total - event.loaded;
-              const eta = avgSpeed > 0 ? Math.ceil(remaining / avgSpeed) : null;
-
-              setUploads((prev) =>
-                prev.map((upload) =>
-                  upload.id === uploadId
-                    ? {
-                        ...upload,
-                        progress: percentage,
-                        bytesPerSecond: avgSpeed,
-                        estimatedSecondsRemaining: eta,
-                      }
-                    : upload,
-                ),
-              );
-            });
-
-            xhr.addEventListener("load", () => {
-              if (xhr.status >= 200 && xhr.status < 300) {
-                resolve();
-                return;
-              }
-              reject(new Error(`Upload failed: ${xhr.status} ${xhr.statusText}`));
-            });
-
-            xhr.addEventListener("error", () => {
-              reject(new Error("Upload failed: Network error"));
-            });
-
-            xhr.addEventListener("abort", () => {
-              reject(new Error("Upload cancelled"));
-            });
-
-            abortController.signal.addEventListener("abort", () => {
-              xhr.abort();
-            });
-
-            xhr.open("PUT", url);
-            xhr.setRequestHeader("Content-Type", file.type || "video/mp4");
-            xhr.send(file);
-          });
-
-          await markUploadComplete({ videoId: createdVideoId });
-
-          setUploads((prev) =>
-            prev.map((upload) =>
-              upload.id === uploadId
-                ? { ...upload, status: "complete", progress: 100 }
+                ? { ...upload, status: "complete", progress: 100, resuming: false }
                 : upload,
             ),
           );
@@ -160,22 +193,40 @@ export function useVideoUploadManager() {
         } catch (error) {
           const errorMessage =
             error instanceof Error ? error.message : "Upload failed";
+          const cancelled = abortController.signal.aborted;
+          const resumable = isResumableUploadError(error);
+          const canRetryProcessing = isProcessingRetryError(error);
 
           setUploads((prev) =>
             prev.map((upload) =>
               upload.id === uploadId
-                ? { ...upload, status: "error", error: errorMessage }
+                ? {
+                    ...upload,
+                    status: cancelled ? "pending" : "error",
+                    error: cancelled ? undefined : errorMessage,
+                    canRetryProcessing,
+                  }
                 : upload,
             ),
           );
 
-          if (createdVideoId) {
+          if (cancelled) {
+            setUploads((prev) => prev.filter((upload) => upload.id !== uploadId));
+          } else if (createdVideoId && !resumable && !canRetryProcessing) {
+            deleteUploadResumeSession(createdVideoId).catch(console.error);
             markUploadFailed({ videoId: createdVideoId }).catch(console.error);
           }
         }
       }
     },
-    [createVideo, getUploadUrl, markUploadComplete, markUploadFailed],
+    [
+      createVideo,
+      initiateVideoUpload,
+      signUploadParts,
+      completeMultipartUpload,
+      markUploadComplete,
+      markUploadFailed,
+    ],
   );
 
   const cancelUpload = useCallback(
@@ -185,16 +236,73 @@ export function useVideoUploadManager() {
         upload.abortController.abort();
       }
       if (upload?.videoId) {
-        markUploadFailed({ videoId: upload.videoId }).catch(console.error);
+        abortVideoUpload({ videoId: upload.videoId }).catch(console.error);
+        deleteUploadResumeSession(upload.videoId).catch(console.error);
       }
       setUploads((prev) => prev.filter((item) => item.id !== uploadId));
     },
-    [uploads, markUploadFailed],
+    [uploads, abortVideoUpload],
+  );
+
+  const retryProcessing = useCallback(
+    async (uploadId: string) => {
+      const upload = uploads.find((item) => item.id === uploadId);
+      if (!upload?.videoId || !upload.canRetryProcessing) return;
+
+      setUploads((prev) =>
+        prev.map((item) =>
+          item.id === uploadId
+            ? {
+                ...item,
+                status: "processing",
+                error: undefined,
+                canRetryProcessing: false,
+              }
+            : item,
+        ),
+      );
+
+      try {
+        await markUploadComplete({ videoId: upload.videoId });
+        await deleteUploadResumeSession(upload.videoId);
+        setUploads((prev) =>
+          prev.map((item) =>
+            item.id === uploadId
+              ? { ...item, status: "complete", progress: 100, resuming: false }
+              : item,
+          ),
+        );
+        setTimeout(() => {
+          setUploads((prev) => prev.filter((item) => item.id !== uploadId));
+        }, 3000);
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : "Processing failed";
+        const canRetryProcessing = isProcessingRetryError(error);
+        if (!canRetryProcessing) {
+          await deleteUploadResumeSession(upload.videoId);
+        }
+        setUploads((prev) =>
+          prev.map((item) =>
+            item.id === uploadId
+              ? {
+                  ...item,
+                  status: "error",
+                  error: errorMessage,
+                  canRetryProcessing,
+                }
+              : item,
+          ),
+        );
+      }
+    },
+    [uploads, markUploadComplete],
   );
 
   return {
     uploads,
     uploadFilesToProject,
     cancelUpload,
+    retryProcessing,
   };
 }

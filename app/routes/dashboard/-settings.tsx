@@ -1,7 +1,7 @@
 import { useAction, useConvex, useMutation } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -79,7 +79,11 @@ export default function TeamSettingsPage() {
   const updateTeamSubscriptionPlan = useAction(
     api.billing.updateTeamSubscriptionPlan,
   );
+  const reconcileTeamSubscription = useAction(
+    api.billing.reconcileTeamSubscription,
+  );
 
+  const reconciledTeamIdRef = useRef<string | null>(null);
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState("");
   const [memberDialogOpen, setMemberDialogOpen] = useState(false);
@@ -105,6 +109,16 @@ export default function TeamSettingsPage() {
       navigate({ to: canonicalSettingsPath, replace: true });
     }
   }, [shouldCanonicalize, canonicalSettingsPath, navigate]);
+
+  useEffect(() => {
+    if (!team || team.role !== "owner") return;
+    if (reconciledTeamIdRef.current === team._id) return;
+
+    reconciledTeamIdRef.current = team._id;
+    void reconcileTeamSubscription({ teamId: team._id }).catch((error) => {
+      console.warn("Stripe billing reconciliation failed", error);
+    });
+  }, [reconcileTeamSubscription, team]);
 
   if (context === undefined || shouldCanonicalize) {
     return (

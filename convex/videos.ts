@@ -4,7 +4,11 @@ import { identityName, requireProjectAccess, requireVideoAccess } from "./auth";
 import { Id } from "./_generated/dataModel";
 import { generateUniqueToken } from "./security";
 import { resolveActiveShareGrant } from "./shareAccess";
-import { assertTeamCanStoreBytes } from "./billingHelpers";
+import {
+  assertTeamCanStoreBytes,
+  assertTeamHasActiveSubscription,
+} from "./billingHelpers";
+import { assertVideoFileSizeAllowed } from "./uploadLimits";
 
 const workflowStatusValidator = v.union(
   v.literal("review"),
@@ -59,6 +63,7 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     const { user, project } = await requireProjectAccess(ctx, args.projectId, "member");
+    assertVideoFileSizeAllowed(args.fileSize ?? 0);
     await assertTeamCanStoreBytes(ctx, project.teamId, args.fileSize ?? 0);
     const publicId = await generatePublicId(ctx);
 
@@ -75,6 +80,7 @@ export const create = mutation({
       workflowStatus: "review",
       visibility: "public",
       publicId,
+      uploadUpdatedAt: Date.now(),
     });
 
     return videoId;
@@ -327,10 +333,16 @@ export const setUploadInfo = internalMutation({
     s3Key: v.string(),
     fileSize: v.number(),
     contentType: v.string(),
+    s3MultipartUploadId: v.optional(v.string()),
+    s3MultipartPartSizeBytes: v.optional(v.number()),
+    s3MultipartPartCount: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.videoId, {
       s3Key: args.s3Key,
+      s3MultipartUploadId: args.s3MultipartUploadId,
+      s3MultipartPartSizeBytes: args.s3MultipartPartSizeBytes,
+      s3MultipartPartCount: args.s3MultipartPartCount,
       muxUploadId: undefined,
       muxAssetId: undefined,
       muxPlaybackId: undefined,
@@ -341,7 +353,46 @@ export const setUploadInfo = internalMutation({
       fileSize: args.fileSize,
       contentType: args.contentType,
       status: "uploading",
+      uploadUpdatedAt: Date.now(),
     });
+  },
+});
+
+export const assertVideoUploadAllowed = internalQuery({
+  args: {
+    videoId: v.id("videos"),
+    fileSize: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const video = await ctx.db.get(args.videoId);
+    if (!video) {
+      throw new Error("Video not found");
+    }
+
+    const project = await ctx.db.get(video.projectId);
+    if (!project) {
+      throw new Error("Project not found");
+    }
+    assertVideoFileSizeAllowed(args.fileSize);
+
+    const currentBytes =
+      video.status !== "failed" &&
+      typeof video.fileSize === "number" &&
+      Number.isFinite(video.fileSize)
+        ? Math.max(0, video.fileSize)
+        : 0;
+    const requestedBytes = Number.isFinite(args.fileSize)
+      ? Math.max(0, args.fileSize)
+      : 0;
+    const incrementalBytes = Math.max(0, requestedBytes - currentBytes);
+
+    if (incrementalBytes > 0) {
+      await assertTeamCanStoreBytes(ctx, project.teamId, incrementalBytes);
+    } else {
+      await assertTeamHasActiveSubscription(ctx, project.teamId);
+    }
+
+    return null;
   },
 });
 
@@ -363,7 +414,9 @@ export const reconcileUploadedObjectMetadata = internalMutation({
     }
 
     const declaredSize =
-      typeof video.fileSize === "number" && Number.isFinite(video.fileSize)
+      video.status !== "failed" &&
+      typeof video.fileSize === "number" &&
+      Number.isFinite(video.fileSize)
         ? Math.max(0, video.fileSize)
         : 0;
     const actualSize = Number.isFinite(args.fileSize) ? Math.max(0, args.fileSize) : 0;
@@ -371,6 +424,8 @@ export const reconcileUploadedObjectMetadata = internalMutation({
 
     if (sizeDelta > 0) {
       await assertTeamCanStoreBytes(ctx, project.teamId, sizeDelta);
+    } else {
+      await assertTeamHasActiveSubscription(ctx, project.teamId);
     }
 
     await ctx.db.patch(args.videoId, {
@@ -389,6 +444,10 @@ export const markAsProcessing = internalMutation({
       status: "processing",
       muxAssetStatus: "preparing",
       uploadError: undefined,
+      s3MultipartUploadId: undefined,
+      s3MultipartPartSizeBytes: undefined,
+      s3MultipartPartCount: undefined,
+      uploadUpdatedAt: Date.now(),
     });
   },
 });
@@ -402,6 +461,15 @@ export const markAsReady = internalMutation({
     thumbnailUrl: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const video = await ctx.db.get(args.videoId);
+    if (
+      !video ||
+      video.status !== "processing" ||
+      video.muxAssetId !== args.muxAssetId
+    ) {
+      return false;
+    }
+
     await ctx.db.patch(args.videoId, {
       muxAssetId: args.muxAssetId,
       muxPlaybackId: args.muxPlaybackId,
@@ -410,7 +478,38 @@ export const markAsReady = internalMutation({
       thumbnailUrl: args.thumbnailUrl,
       uploadError: undefined,
       status: "ready",
+      s3MultipartUploadId: undefined,
+      s3MultipartPartSizeBytes: undefined,
+      s3MultipartPartCount: undefined,
+      uploadUpdatedAt: Date.now(),
     });
+    return true;
+  },
+});
+
+export const markMuxAssetAsFailed = internalMutation({
+  args: {
+    videoId: v.id("videos"),
+    muxAssetId: v.string(),
+    uploadError: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const video = await ctx.db.get(args.videoId);
+    if (
+      !video ||
+      video.status !== "processing" ||
+      video.muxAssetId !== args.muxAssetId
+    ) {
+      return false;
+    }
+
+    await ctx.db.patch(args.videoId, {
+      muxAssetStatus: "errored",
+      uploadError: args.uploadError,
+      status: "failed",
+      uploadUpdatedAt: Date.now(),
+    });
+    return true;
   },
 });
 
@@ -424,6 +523,116 @@ export const markAsFailed = internalMutation({
       muxAssetStatus: "errored",
       uploadError: args.uploadError,
       status: "failed",
+      s3MultipartUploadId: undefined,
+      s3MultipartPartSizeBytes: undefined,
+      s3MultipartPartCount: undefined,
+      uploadUpdatedAt: Date.now(),
+    });
+  },
+});
+
+export const clearMultipartUploadId = internalMutation({
+  args: {
+    videoId: v.id("videos"),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.videoId, {
+      s3MultipartUploadId: undefined,
+      s3MultipartPartSizeBytes: undefined,
+      s3MultipartPartCount: undefined,
+      uploadUpdatedAt: Date.now(),
+    });
+  },
+});
+
+export const touchUploadActivity = internalMutation({
+  args: {
+    videoId: v.id("videos"),
+  },
+  handler: async (ctx, args) => {
+    const video = await ctx.db.get(args.videoId);
+    if (!video || video.status !== "uploading") {
+      return;
+    }
+
+    await ctx.db.patch(args.videoId, {
+      uploadUpdatedAt: Date.now(),
+    });
+  },
+});
+
+export const listStaleUploadCandidates = internalQuery({
+  args: {
+    cutoff: v.number(),
+    limit: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const candidates = (await ctx.db
+      .query("videos")
+      .withIndex("by_status_and_upload_updated_at", (q) =>
+        q.eq("status", "uploading"),
+      )
+      .take(args.limit))
+      .filter((video) => video.s3Key && video.s3MultipartUploadId)
+      .filter(
+        (video) =>
+          (video.uploadUpdatedAt ?? video._creationTime) < args.cutoff,
+      )
+      .sort(
+        (a, b) =>
+          (a.uploadUpdatedAt ?? a._creationTime) -
+          (b.uploadUpdatedAt ?? b._creationTime),
+      )
+      .slice(0, args.limit);
+
+    return candidates.map((video) => ({ videoId: video._id }));
+  },
+});
+
+export const claimStaleUpload = internalMutation({
+  args: {
+    videoId: v.id("videos"),
+    cutoff: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const video = await ctx.db.get(args.videoId);
+    if (
+      !video ||
+      video.status !== "uploading" ||
+      (video.uploadUpdatedAt ?? video._creationTime) >= args.cutoff ||
+      !video.s3Key ||
+      !video.s3MultipartUploadId
+    ) {
+      return null;
+    }
+
+    await ctx.db.patch(args.videoId, {
+      status: "failed",
+      muxAssetStatus: "errored",
+      uploadError: "Upload expired after a period of inactivity.",
+      uploadUpdatedAt: Date.now(),
+    });
+
+    return {
+      key: video.s3Key,
+      uploadId: video.s3MultipartUploadId,
+    };
+  },
+});
+
+export const clearUploadStorageInfo = internalMutation({
+  args: {
+    videoId: v.id("videos"),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.videoId, {
+      s3Key: undefined,
+      s3MultipartUploadId: undefined,
+      s3MultipartPartSizeBytes: undefined,
+      s3MultipartPartCount: undefined,
+      fileSize: undefined,
+      contentType: undefined,
+      uploadUpdatedAt: Date.now(),
     });
   },
 });
@@ -438,6 +647,10 @@ export const setMuxAssetReference = internalMutation({
       muxAssetId: args.muxAssetId,
       muxAssetStatus: "preparing",
       status: "processing",
+      s3MultipartUploadId: undefined,
+      s3MultipartPartSizeBytes: undefined,
+      s3MultipartPartCount: undefined,
+      uploadUpdatedAt: Date.now(),
     });
   },
 });
@@ -495,6 +708,101 @@ export const getVideoByMuxAssetId = internalQuery({
 
     if (!video) return null;
     return { videoId: video._id };
+  },
+});
+
+export const getMuxProcessingState = internalQuery({
+  args: {
+    videoId: v.id("videos"),
+  },
+  handler: async (ctx, args) => {
+    const video = await ctx.db.get(args.videoId);
+    if (
+      !video ||
+      video.status !== "processing" ||
+      !video.muxAssetId
+    ) {
+      return null;
+    }
+
+    return {
+      muxAssetId: video.muxAssetId,
+    };
+  },
+});
+
+export const claimMuxProcessingCandidates = internalMutation({
+  args: {
+    limit: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const videos = await ctx.db
+      .query("videos")
+      .withIndex("by_status_and_mux_last_polled_at", (q) =>
+        q.eq("status", "processing"),
+      )
+      .filter((q) => q.neq(q.field("muxAssetId"), undefined))
+      .take(args.limit);
+
+    const claimedAt = Date.now();
+    const candidates = [];
+    for (const video of videos) {
+      if (!video.muxAssetId) continue;
+      await ctx.db.patch(video._id, { muxLastPolledAt: claimedAt });
+      candidates.push({
+        videoId: video._id,
+        muxAssetId: video.muxAssetId,
+      });
+    }
+    return candidates;
+  },
+});
+
+export const claimCronLock = internalMutation({
+  args: {
+    name: v.string(),
+    owner: v.string(),
+    ttlMs: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("cronLocks")
+      .withIndex("by_name", (q) => q.eq("name", args.name))
+      .unique();
+    const now = Date.now();
+    if (existing && existing.expiresAt > now) {
+      return false;
+    }
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        owner: args.owner,
+        expiresAt: now + args.ttlMs,
+      });
+    } else {
+      await ctx.db.insert("cronLocks", {
+        name: args.name,
+        owner: args.owner,
+        expiresAt: now + args.ttlMs,
+      });
+    }
+    return true;
+  },
+});
+
+export const releaseCronLock = internalMutation({
+  args: {
+    name: v.string(),
+    owner: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("cronLocks")
+      .withIndex("by_name", (q) => q.eq("name", args.name))
+      .unique();
+    if (existing?.owner === args.owner) {
+      await ctx.db.delete(existing._id);
+    }
   },
 });
 
