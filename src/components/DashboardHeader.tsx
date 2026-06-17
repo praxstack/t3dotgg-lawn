@@ -4,7 +4,12 @@ import { Moon, Sun } from "lucide-react";
 import { useTheme } from "@/components/theme/ThemeToggle";
 import React from "react";
 import { useConvex } from "convex/react";
+import type { Id } from "@convex/_generated/dataModel";
+import { cn } from "@/lib/utils";
 import { useRoutePrewarmIntent } from "@/lib/useRoutePrewarmIntent";
+import { useFolderDropTarget } from "@/lib/dnd/useFolderDropTarget";
+import type { FolderNode } from "@/lib/folderTree";
+import type { DragPayload } from "@/lib/dnd/payload";
 import { prewarmDashboardIndex } from "../../app/routes/dashboard/-index.data";
 
 function ThemeToggleButton() {
@@ -28,11 +33,68 @@ function ThemeToggleButton() {
   );
 }
 
+/** Makes a breadcrumb segment a drop target so items can be dragged "up" the
+ * tree onto an ancestor (or the team root for top level), file-manager style. */
+export type BreadcrumbDrop = {
+  teamId: Id<"teams">;
+  /** Destination folder; omit for "top level" (folders only). */
+  targetProjectId?: Id<"projects">;
+  /** Team folder list, for the folder-into-descendant guard. */
+  folders?: readonly FolderNode[];
+  disabled?: boolean;
+  onDropMove: (payload: DragPayload) => void;
+};
+
 export type PathSegment = {
   label: React.ReactNode;
   href?: string;
   prewarmIntentHandlers?: ReturnType<typeof useRoutePrewarmIntent>;
+  drop?: BreadcrumbDrop;
 };
+
+function BreadcrumbSegment({
+  path,
+  isIntermediate,
+}: {
+  path: PathSegment;
+  isIntermediate: boolean;
+}) {
+  const { ref, isDraggedOver, canDropHere } = useFolderDropTarget<HTMLDivElement>({
+    disabled: !path.drop || path.drop.disabled,
+    targetProjectId: path.drop?.targetProjectId,
+    teamId: path.drop?.teamId as Id<"teams">,
+    folders: path.drop?.folders,
+    onMove: (payload) => path.drop?.onDropMove(payload),
+  });
+
+  return (
+    <div
+      ref={ref}
+      className={cn(
+        `${isIntermediate ? "hidden sm:flex" : "flex"} items-center min-w-0 flex-shrink`,
+        isDraggedOver && canDropHere && "bg-[#2d5a2d]/10 text-[#2d5a2d]",
+        isDraggedOver && !canDropHere && "bg-[#dc2626]/10",
+      )}
+    >
+      <span className="text-[#888] mr-2 flex-shrink-0">/</span>
+      {path.href ? (
+        <Link
+          to={path.href}
+          preload="intent"
+          className={cn(
+            "hover:text-[#2d5a2d] transition-colors truncate mr-2",
+            isDraggedOver && canDropHere && "text-[#2d5a2d] underline",
+          )}
+          {...path.prewarmIntentHandlers}
+        >
+          {path.label}
+        </Link>
+      ) : (
+        <div className="truncate flex items-center gap-3">{path.label}</div>
+      )}
+    </div>
+  );
+}
 
 export function DashboardHeader({
   children,
@@ -61,24 +123,12 @@ export function DashboardHeader({
         {paths.map((path, index) => {
           const isIntermediate = paths.length >= 2 && index < paths.length - 1;
           return (
-          <div key={index} className={`${isIntermediate ? 'hidden sm:flex' : 'flex'} items-center min-w-0 flex-shrink`}>
-            <span className="text-[#888] mr-2 flex-shrink-0">/</span>
-            {path.href ? (
-              <Link
-                to={path.href}
-                preload="intent"
-                className="hover:text-[#2d5a2d] transition-colors truncate mr-2"
-                {...path.prewarmIntentHandlers}
-              >
-                {path.label}
-              </Link>
-            ) : (
-              <div className="truncate flex items-center gap-3">
-                {path.label}
-              </div>
-            )}
-          </div>
-        );
+            <BreadcrumbSegment
+              key={index}
+              path={path}
+              isIntermediate={isIntermediate}
+            />
+          );
         })}
       </div>
 

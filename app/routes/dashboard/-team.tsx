@@ -1,5 +1,5 @@
 
-import { useConvex, useMutation } from "convex/react";
+import { useMutation } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
@@ -20,100 +20,18 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Folder, Plus, MoreVertical, Trash2, Users, ArrowRight, CreditCard } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { Folder, Plus, Users, CreditCard } from "lucide-react";
 import { MemberInvite } from "@/components/teams/MemberInvite";
 import { cn } from "@/lib/utils";
 import { projectPath, teamSettingsPath } from "@/lib/routes";
 import { Id } from "@convex/_generated/dataModel";
-import { useRoutePrewarmIntent } from "@/lib/useRoutePrewarmIntent";
-import { prewarmProject } from "./-project.data";
+import { ProjectCard } from "@/components/projects/ProjectCard";
+import { MoveProjectDialog } from "@/components/projects/MoveProjectDialog";
 import { useTeamData } from "./-team.data";
 import { DashboardHeader } from "@/components/DashboardHeader";
-
-type TeamProjectCardProps = {
-  teamSlug: string;
-  project: {
-    _id: Id<"projects">;
-    name: string;
-    videoCount: number;
-  };
-  canCreateProject: boolean;
-  onOpen: () => void;
-  onDelete: (projectId: Id<"projects">) => void;
-};
-
-function TeamProjectCard({
-  teamSlug,
-  project,
-  canCreateProject,
-  onOpen,
-  onDelete,
-}: TeamProjectCardProps) {
-  const convex = useConvex();
-  const prewarmIntentHandlers = useRoutePrewarmIntent(() =>
-    prewarmProject(convex, {
-      teamSlug,
-      projectId: project._id,
-    }),
-  );
-
-  return (
-    <Card
-      className="group cursor-pointer hover:bg-[#e8e8e0] transition-colors"
-      onClick={onOpen}
-      {...prewarmIntentHandlers}
-    >
-      <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
-        <div className="flex-1 min-w-0">
-          <CardTitle className="text-base truncate">{project.name}</CardTitle>
-          <CardDescription className="mt-1">
-            {project.videoCount} video{project.videoCount !== 1 ? "s" : ""}
-          </CardDescription>
-        </div>
-        {canCreateProject && (
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              asChild
-              onClick={(e) => e.stopPropagation()}
-            >
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
-              >
-                <MoreVertical className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem
-                className="text-[#dc2626] focus:text-[#dc2626]"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDelete(project._id);
-                }}
-              >
-                <Trash2 className="mr-2 h-4 w-4" />
-                Delete
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-      </CardHeader>
-      <CardContent>
-        <div className="flex items-center justify-between text-sm text-[#888] group-hover:text-[#1a1a1a] transition-colors">
-          <span>Open project</span>
-          <ArrowRight className="h-4 w-4" />
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
+import { useMoveActions } from "@/lib/dnd/useMoveActions";
+import { useFolderDropTarget } from "@/lib/dnd/useFolderDropTarget";
+import type { DragPayload } from "@/lib/dnd/payload";
 
 export default function TeamPage() {
   const params = useParams({ strict: false });
@@ -124,11 +42,41 @@ export default function TeamPage() {
   const { context, team, projects, billing } = useTeamData({ teamSlug });
   const createProject = useMutation(api.projects.create);
   const deleteProject = useMutation(api.projects.remove);
+  const { moveFromDrop } = useMoveActions();
+  const [dndError, setDndError] = useState<string | null>(null);
+
+  const handleDropMove = (payload: DragPayload, destProjectId?: Id<"projects">) => {
+    void moveFromDrop(payload, destProjectId).then((result) => {
+      setDndError(result.error ?? null);
+    });
+  };
+
+  // Auto-dismiss the drop error, matching the share-toast behavior.
+  useEffect(() => {
+    if (!dndError) return;
+    const timeout = window.setTimeout(() => setDndError(null), 3000);
+    return () => window.clearTimeout(timeout);
+  }, [dndError]);
+
+  // Empty background of the team grid = move a folder to the top level.
+  const teamId = team?._id;
+  const canCreateProjectRef = team?.role !== "viewer";
+  const { ref: gridDropRef, isDraggedOver: gridDraggedOver, canDropHere: gridCanDrop } =
+    useFolderDropTarget<HTMLDivElement>({
+      disabled: !teamId || !canCreateProjectRef,
+      targetProjectId: undefined, // top level
+      teamId: teamId as Id<"teams">,
+      onMove: (payload) => handleDropMove(payload, undefined),
+    });
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [memberDialogOpen, setMemberDialogOpen] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [moveTarget, setMoveTarget] = useState<{
+    _id: Id<"projects">;
+    name: string;
+  } | null>(null);
 
   const shouldCanonicalize =
     !!context && !context.isCanonical && pathname !== context.canonicalPath;
@@ -175,7 +123,12 @@ export default function TeamPage() {
   };
 
   const handleDeleteProject = async (projectId: Id<"projects">) => {
-    if (!confirm("Are you sure you want to delete this project?")) return;
+    if (
+      !confirm(
+        "Delete this project and everything inside it (sub-folders and videos)? This can't be undone.",
+      )
+    )
+      return;
     try {
       await deleteProject({ projectId });
     } catch (error) {
@@ -285,25 +238,56 @@ export default function TeamPage() {
             </Card>
           </div>
         ) : (
-          <div className={cn(
-            "grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 transition-opacity duration-300",
-            isLoadingData ? "opacity-0" : "opacity-100"
-          )}>
+          <div
+            ref={gridDropRef}
+            className={cn(
+              "grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 transition-opacity duration-300",
+              isLoadingData ? "opacity-0" : "opacity-100",
+              gridDraggedOver && gridCanDrop &&
+                "outline-2 outline-dashed outline-[#2d5a2d] outline-offset-4",
+            )}
+          >
             {projects?.map((project) => (
-              <TeamProjectCard
+              <ProjectCard
                 key={project._id}
                 teamSlug={team.slug}
                 project={project}
-                canCreateProject={canCreateProject}
                 onOpen={() =>
                   navigate({ to: projectPath(team.slug, project._id) })
                 }
-                onDelete={handleDeleteProject}
+                onDelete={canCreateProject ? handleDeleteProject : undefined}
+                onMove={canCreateProject ? (p) => setMoveTarget(p) : undefined}
+                dnd={
+                  teamId
+                    ? {
+                        teamId,
+                        currentParentId: undefined,
+                        // `folders` is intentionally omitted: the team root only
+                        // renders root folders, so a folder's own descendants are
+                        // never visible here as drop targets. `projects.move`
+                        // still enforces the cycle guard server-side.
+                        disabled: !canCreateProject,
+                        onDropMove: handleDropMove,
+                      }
+                    : undefined
+                }
               />
             ))}
           </div>
         )}
       </div>
+
+      {dndError ? (
+        <div className="fixed right-4 top-16 z-50" aria-live="polite">
+          <button
+            type="button"
+            onClick={() => setDndError(null)}
+            className="border-2 border-[#dc2626] bg-[#fef2f2] px-3 py-2 text-sm font-bold text-[#dc2626] shadow-[4px_4px_0px_0px_var(--shadow-color)]"
+          >
+            {dndError}
+          </button>
+        </div>
+      ) : null}
 
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
         <DialogContent>
@@ -346,6 +330,17 @@ export default function TeamPage() {
           teamId={team._id}
           open={memberDialogOpen}
           onOpenChange={setMemberDialogOpen}
+        />
+      )}
+
+      {team && (
+        <MoveProjectDialog
+          teamId={team._id}
+          project={moveTarget}
+          open={moveTarget !== null}
+          onOpenChange={(open) => {
+            if (!open) setMoveTarget(null);
+          }}
         />
       )}
     </div>

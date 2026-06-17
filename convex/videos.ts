@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { internalMutation, internalQuery, mutation, query, MutationCtx } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { identityName, requireProjectAccess, requireVideoAccess } from "./auth";
 import { Id } from "./_generated/dataModel";
 import { generateUniqueToken } from "./security";
@@ -17,6 +18,8 @@ const workflowStatusValidator = v.union(
 );
 
 const visibilityValidator = v.union(v.literal("public"), v.literal("private"));
+
+const VIDEO_DELETE_BATCH_DOCS = 500;
 
 type WorkflowStatus =
   | "review"
@@ -39,10 +42,10 @@ async function generatePublicId(ctx: MutationCtx) {
   );
 }
 
-async function deleteShareAccessGrantsForLink(
+export async function deleteShareAccessGrantsForLink(
   ctx: MutationCtx,
   linkId: Id<"shareLinks">,
-) {
+): Promise<number> {
   const grants = await ctx.db
     .query("shareAccessGrants")
     .withIndex("by_share_link", (q) => q.eq("shareLinkId", linkId))
@@ -51,6 +54,101 @@ async function deleteShareAccessGrantsForLink(
   for (const grant of grants) {
     await ctx.db.delete(grant._id);
   }
+
+  return grants.length;
+}
+
+/**
+ * Deletes a video and everything that depends on it (comments, share links and
+ * their access grants). Returns the number of documents deleted so callers that
+ * delete many videos in one transaction (e.g. the folder subtree cascade) can
+ * budget against Convex's per-transaction limits.
+ */
+export async function deleteVideoAndDependents(
+  ctx: MutationCtx,
+  videoId: Id<"videos">,
+): Promise<number> {
+  let deleted = 0;
+
+  const comments = await ctx.db
+    .query("comments")
+    .withIndex("by_video", (q) => q.eq("videoId", videoId))
+    .collect();
+  for (const comment of comments) {
+    await ctx.db.delete(comment._id);
+    deleted++;
+  }
+
+  const shareLinks = await ctx.db
+    .query("shareLinks")
+    .withIndex("by_video", (q) => q.eq("videoId", videoId))
+    .collect();
+  for (const link of shareLinks) {
+    deleted += await deleteShareAccessGrantsForLink(ctx, link._id);
+    await ctx.db.delete(link._id);
+    deleted++;
+  }
+
+  await ctx.db.delete(videoId);
+  deleted++;
+
+  return deleted;
+}
+
+/**
+ * Deletes up to `maxDocuments` records belonging to a video. The video itself
+ * is removed only after its comments, share links, and access grants are gone.
+ */
+export async function deleteVideoAndDependentsBatch(
+  ctx: MutationCtx,
+  videoId: Id<"videos">,
+  maxDocuments: number,
+): Promise<{ deleted: number; done: boolean }> {
+  const video = await ctx.db.get(videoId);
+  if (!video) return { deleted: 0, done: true };
+
+  let remaining = maxDocuments;
+  let deleted = 0;
+
+  const comments = await ctx.db
+    .query("comments")
+    .withIndex("by_video", (q) => q.eq("videoId", videoId))
+    .take(remaining);
+  for (const comment of comments) {
+    await ctx.db.delete(comment._id);
+  }
+  deleted += comments.length;
+  remaining -= comments.length;
+  if (remaining === 0) return { deleted, done: false };
+
+  while (remaining > 0) {
+    const link = await ctx.db
+      .query("shareLinks")
+      .withIndex("by_video", (q) => q.eq("videoId", videoId))
+      .first();
+    if (!link) break;
+
+    const grantLimit = remaining;
+    const grants = await ctx.db
+      .query("shareAccessGrants")
+      .withIndex("by_share_link", (q) => q.eq("shareLinkId", link._id))
+      .take(grantLimit);
+    for (const grant of grants) {
+      await ctx.db.delete(grant._id);
+    }
+    deleted += grants.length;
+    remaining -= grants.length;
+    if (remaining === 0) return { deleted, done: false };
+
+    await ctx.db.delete(link._id);
+    deleted++;
+    remaining--;
+  }
+
+  if (remaining === 0) return { deleted, done: false };
+
+  await ctx.db.delete(videoId);
+  return { deleted: deleted + 1, done: true };
 }
 
 export const create = mutation({
@@ -273,6 +371,39 @@ export const update = mutation({
   },
 });
 
+export const move = mutation({
+  args: {
+    videoId: v.id("videos"),
+    projectId: v.id("projects"), // destination folder
+  },
+  handler: async (ctx, args) => {
+    // Validate access to the SOURCE: `requireVideoAccess` loads the video and its
+    // current (source) project, and requires `member` on the source folder's team.
+    const { project: sourceProject } = await requireVideoAccess(
+      ctx,
+      args.videoId,
+      "member",
+    );
+
+    if (sourceProject._id === args.projectId) {
+      return; // no-op: dropped back into the same folder
+    }
+
+    // Validate the DESTINATION: caller must be a member of the destination
+    // folder's team, and that team must match the source video's team.
+    const { project: dest } = await requireProjectAccess(
+      ctx,
+      args.projectId,
+      "member",
+    );
+    if (dest.teamId !== sourceProject.teamId) {
+      throw new Error("Can't move a video to a different team");
+    }
+
+    await ctx.db.patch(args.videoId, { projectId: args.projectId });
+  },
+});
+
 export const setVisibility = mutation({
   args: {
     videoId: v.id("videos"),
@@ -305,25 +436,34 @@ export const remove = mutation({
   args: { videoId: v.id("videos") },
   handler: async (ctx, args) => {
     await requireVideoAccess(ctx, args.videoId, "admin");
-
-    const comments = await ctx.db
-      .query("comments")
-      .withIndex("by_video", (q) => q.eq("videoId", args.videoId))
-      .collect();
-    for (const comment of comments) {
-      await ctx.db.delete(comment._id);
+    const result = await deleteVideoAndDependentsBatch(
+      ctx,
+      args.videoId,
+      VIDEO_DELETE_BATCH_DOCS,
+    );
+    if (!result.done) {
+      await ctx.scheduler.runAfter(0, internal.videos.continueVideoDelete, {
+        videoId: args.videoId,
+      });
     }
+  },
+});
 
-    const shareLinks = await ctx.db
-      .query("shareLinks")
-      .withIndex("by_video", (q) => q.eq("videoId", args.videoId))
-      .collect();
-    for (const link of shareLinks) {
-      await deleteShareAccessGrantsForLink(ctx, link._id);
-      await ctx.db.delete(link._id);
+export const continueVideoDelete = internalMutation({
+  args: { videoId: v.id("videos") },
+  handler: async (ctx, args) => {
+    const result = await deleteVideoAndDependentsBatch(
+      ctx,
+      args.videoId,
+      VIDEO_DELETE_BATCH_DOCS,
+    );
+    if (!result.done) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.videos.continueVideoDelete,
+        args,
+      );
     }
-
-    await ctx.db.delete(args.videoId);
   },
 });
 

@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
 import { getUser, identityAvatarUrl, identityEmail, identityName, requireUser, requireTeamAccess } from "./auth";
 import { getTeamSubscriptionState } from "./billingHelpers";
+import { deleteVideoAndDependents } from "./videos";
 
 function normalizedEmail(value: string) {
   return value.trim().toLowerCase();
@@ -109,21 +110,32 @@ export const listWithProjects = query({
         const team = await ctx.db.get(membership.teamId);
         if (!team) return null;
         
+        // Only root folders show on the dashboard home; nested folders are
+        // reached by drilling into their parent.
         const projects = await ctx.db
           .query("projects")
-          .withIndex("by_team", (q) => q.eq("teamId", team._id))
+          .withIndex("by_team_and_parent", (q) =>
+            q.eq("teamId", team._id).eq("parentId", undefined),
+          )
           .collect();
 
-        // Get video counts for each project
+        // Get video + subfolder counts for each root folder
         const projectsWithCounts = await Promise.all(
           projects.map(async (project) => {
             const videos = await ctx.db
               .query("videos")
               .withIndex("by_project", (q) => q.eq("projectId", project._id))
               .collect();
+            const subfolders = await ctx.db
+              .query("projects")
+              .withIndex("by_team_and_parent", (q) =>
+                q.eq("teamId", team._id).eq("parentId", project._id),
+              )
+              .collect();
             return {
               ...project,
               videoCount: videos.length,
+              subfolderCount: subfolders.length,
             };
           })
         );
@@ -414,7 +426,8 @@ export const deleteTeam = mutation({
       await ctx.db.delete(invite._id);
     }
 
-    // Delete all projects and their videos/comments
+    // Delete all projects and their videos/comments. by_team is intentionally
+    // team-wide here, so it already covers nested folders regardless of depth.
     const projects = await ctx.db
       .query("projects")
       .withIndex("by_team", (q) => q.eq("teamId", args.teamId))
@@ -427,32 +440,7 @@ export const deleteTeam = mutation({
         .collect();
 
       for (const video of videos) {
-        // Delete comments
-        const comments = await ctx.db
-          .query("comments")
-          .withIndex("by_video", (q) => q.eq("videoId", video._id))
-          .collect();
-        for (const comment of comments) {
-          await ctx.db.delete(comment._id);
-        }
-
-        // Delete share links
-        const shareLinks = await ctx.db
-          .query("shareLinks")
-          .withIndex("by_video", (q) => q.eq("videoId", video._id))
-          .collect();
-        for (const link of shareLinks) {
-          const grants = await ctx.db
-            .query("shareAccessGrants")
-            .withIndex("by_share_link", (q) => q.eq("shareLinkId", link._id))
-            .collect();
-          for (const grant of grants) {
-            await ctx.db.delete(grant._id);
-          }
-          await ctx.db.delete(link._id);
-        }
-
-        await ctx.db.delete(video._id);
+        await deleteVideoAndDependents(ctx, video._id);
       }
 
       await ctx.db.delete(project._id);

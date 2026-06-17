@@ -61,7 +61,16 @@ export default defineSchema({
     teamId: v.id("teams"),
     name: v.string(),
     description: v.optional(v.string()),
-  }).index("by_team", ["teamId"]),
+    // Self-reference for nested folders. undefined/missing == top-level (a root
+    // folder). Existing rows have no parentId, so they are already roots and no
+    // backfill is needed.
+    parentId: v.optional(v.id("projects")),
+  })
+    // Kept: team-wide flat listing (storage usage, team deletion).
+    .index("by_team", ["teamId"])
+    // Lists the children of a folder, or — with parentId == undefined — the
+    // roots of a team.
+    .index("by_team_and_parent", ["teamId", "parentId"]),
 
   videos: defineTable({
     projectId: v.id("projects"),
