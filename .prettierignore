@@ -1,0 +1,15 @@
+node_modules
+build
+dist
+.react-router
+coverage
+.vercel
+.agents
+.claude
+
+app/routeTree.gen.ts
+convex/_generated
+public
+
+bun.lock
+skills-lock.json

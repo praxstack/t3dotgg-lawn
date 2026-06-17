@@ -28,16 +28,15 @@ export function CommentList({
   const comments = providedComments ?? queriedComments;
 
   if (comments === undefined) {
-    return (
-      <div className="p-4 text-center text-[#888]">Loading...</div>
-    );
+    return <div className="p-4 text-center text-[#888]">Loading...</div>;
   }
 
   if (comments.length === 0) {
     return (
-      <div className="h-full flex items-center justify-center p-6">
-        <p className="text-[#888] text-sm text-center">
-          No comments yet.<br />
+      <div className="flex h-full items-center justify-center p-6">
+        <p className="text-center text-sm text-[#888]">
+          No comments yet.
+          <br />
           Click on the timeline to add one.
         </p>
       </div>
@@ -56,8 +55,8 @@ export function CommentList({
               canResolve={canResolve}
             />
             {comment.replies.length > 0 && (
-              <div className="pl-14 pr-4 pb-4 space-y-4 relative">
-                <div className="absolute left-[1.35rem] top-0 bottom-6 w-px bg-[#1a1a1a]/10 dark:bg-white/10" />
+              <div className="relative space-y-4 pr-4 pb-4 pl-14">
+                <div className="absolute top-0 bottom-6 left-[1.35rem] w-px bg-[#1a1a1a]/10 dark:bg-white/10" />
                 {comment.replies.map((reply) => (
                   <CommentItem
                     key={reply._id}

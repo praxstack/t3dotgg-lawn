@@ -20,16 +20,8 @@ type MoveProjectDialogProps = {
   onOpenChange: (open: boolean) => void;
 };
 
-export function MoveProjectDialog({
-  teamId,
-  project,
-  open,
-  onOpenChange,
-}: MoveProjectDialogProps) {
-  const folders = useQuery(
-    api.projects.listForMove,
-    open ? { teamId } : "skip",
-  );
+export function MoveProjectDialog({ teamId, project, open, onOpenChange }: MoveProjectDialogProps) {
+  const folders = useQuery(api.projects.listForMove, open ? { teamId } : "skip");
   const move = useMutation(api.projects.move);
   const [isMoving, setIsMoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,9 +50,7 @@ export function MoveProjectDialog({
       await move({ projectId: project._id, newParentId });
       onOpenChange(false);
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to move folder",
-      );
+      setError(err instanceof Error ? err.message : "Failed to move folder");
     } finally {
       setIsMoving(false);
     }
@@ -85,12 +75,12 @@ export function MoveProjectDialog({
         {folders === undefined ? (
           <p className="text-sm text-[#888]">Loading folders...</p>
         ) : (
-          <div className="max-h-80 overflow-y-auto border-2 border-[#1a1a1a] divide-y-2 divide-[#1a1a1a]">
+          <div className="max-h-80 divide-y-2 divide-[#1a1a1a] overflow-y-auto border-2 border-[#1a1a1a]">
             <button
               type="button"
               disabled={isMoving}
               className={cn(
-                "flex w-full items-center gap-2 px-4 py-3 text-left hover:bg-[#e8e8e0] transition-colors disabled:opacity-50",
+                "flex w-full items-center gap-2 px-4 py-3 text-left transition-colors hover:bg-[#e8e8e0] disabled:opacity-50",
               )}
               onClick={() => handleMove(undefined)}
             >
@@ -102,16 +92,14 @@ export function MoveProjectDialog({
                 key={folder._id}
                 type="button"
                 disabled={isMoving}
-                className="w-full px-4 py-3 text-left hover:bg-[#e8e8e0] transition-colors disabled:opacity-50"
+                className="w-full px-4 py-3 text-left transition-colors hover:bg-[#e8e8e0] disabled:opacity-50"
                 onClick={() => handleMove(folder._id)}
               >
-                <p className="font-bold text-[#1a1a1a] truncate">{folder.path}</p>
+                <p className="truncate font-bold text-[#1a1a1a]">{folder.path}</p>
               </button>
             ))}
             {destinations.length === 0 && (
-              <p className="px-4 py-3 text-sm text-[#888]">
-                No other folders to move into.
-              </p>
+              <p className="px-4 py-3 text-sm text-[#888]">No other folders to move into.</p>
             )}
           </div>
         )}

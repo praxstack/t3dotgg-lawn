@@ -5,10 +5,7 @@ import { identityName, requireProjectAccess, requireVideoAccess } from "./auth";
 import { Id } from "./_generated/dataModel";
 import { generateUniqueToken } from "./security";
 import { resolveActiveShareGrant } from "./shareAccess";
-import {
-  assertTeamCanStoreBytes,
-  assertTeamHasActiveSubscription,
-} from "./billingHelpers";
+import { assertTeamCanStoreBytes, assertTeamHasActiveSubscription } from "./billingHelpers";
 import { assertVideoFileSizeAllowed } from "./uploadLimits";
 
 const workflowStatusValidator = v.union(
@@ -21,10 +18,7 @@ const visibilityValidator = v.union(v.literal("public"), v.literal("private"));
 
 const VIDEO_DELETE_BATCH_DOCS = 500;
 
-type WorkflowStatus =
-  | "review"
-  | "rework"
-  | "done";
+type WorkflowStatus = "review" | "rework" | "done";
 
 function normalizeWorkflowStatus(status: WorkflowStatus | undefined): WorkflowStatus {
   return status ?? "review";
@@ -379,11 +373,7 @@ export const move = mutation({
   handler: async (ctx, args) => {
     // Validate access to the SOURCE: `requireVideoAccess` loads the video and its
     // current (source) project, and requires `member` on the source folder's team.
-    const { project: sourceProject } = await requireVideoAccess(
-      ctx,
-      args.videoId,
-      "member",
-    );
+    const { project: sourceProject } = await requireVideoAccess(ctx, args.videoId, "member");
 
     if (sourceProject._id === args.projectId) {
       return; // no-op: dropped back into the same folder
@@ -391,11 +381,7 @@ export const move = mutation({
 
     // Validate the DESTINATION: caller must be a member of the destination
     // folder's team, and that team must match the source video's team.
-    const { project: dest } = await requireProjectAccess(
-      ctx,
-      args.projectId,
-      "member",
-    );
+    const { project: dest } = await requireProjectAccess(ctx, args.projectId, "member");
     if (dest.teamId !== sourceProject.teamId) {
       throw new Error("Can't move a video to a different team");
     }
@@ -436,11 +422,7 @@ export const remove = mutation({
   args: { videoId: v.id("videos") },
   handler: async (ctx, args) => {
     await requireVideoAccess(ctx, args.videoId, "admin");
-    const result = await deleteVideoAndDependentsBatch(
-      ctx,
-      args.videoId,
-      VIDEO_DELETE_BATCH_DOCS,
-    );
+    const result = await deleteVideoAndDependentsBatch(ctx, args.videoId, VIDEO_DELETE_BATCH_DOCS);
     if (!result.done) {
       await ctx.scheduler.runAfter(0, internal.videos.continueVideoDelete, {
         videoId: args.videoId,
@@ -452,17 +434,9 @@ export const remove = mutation({
 export const continueVideoDelete = internalMutation({
   args: { videoId: v.id("videos") },
   handler: async (ctx, args) => {
-    const result = await deleteVideoAndDependentsBatch(
-      ctx,
-      args.videoId,
-      VIDEO_DELETE_BATCH_DOCS,
-    );
+    const result = await deleteVideoAndDependentsBatch(ctx, args.videoId, VIDEO_DELETE_BATCH_DOCS);
     if (!result.done) {
-      await ctx.scheduler.runAfter(
-        0,
-        internal.videos.continueVideoDelete,
-        args,
-      );
+      await ctx.scheduler.runAfter(0, internal.videos.continueVideoDelete, args);
     }
   },
 });
@@ -521,9 +495,7 @@ export const assertVideoUploadAllowed = internalQuery({
       Number.isFinite(video.fileSize)
         ? Math.max(0, video.fileSize)
         : 0;
-    const requestedBytes = Number.isFinite(args.fileSize)
-      ? Math.max(0, args.fileSize)
-      : 0;
+    const requestedBytes = Number.isFinite(args.fileSize) ? Math.max(0, args.fileSize) : 0;
     const incrementalBytes = Math.max(0, requestedBytes - currentBytes);
 
     if (incrementalBytes > 0) {
@@ -602,11 +574,7 @@ export const markAsReady = internalMutation({
   },
   handler: async (ctx, args) => {
     const video = await ctx.db.get(args.videoId);
-    if (
-      !video ||
-      video.status !== "processing" ||
-      video.muxAssetId !== args.muxAssetId
-    ) {
+    if (!video || video.status !== "processing" || video.muxAssetId !== args.muxAssetId) {
       return false;
     }
 
@@ -635,11 +603,7 @@ export const markMuxAssetAsFailed = internalMutation({
   },
   handler: async (ctx, args) => {
     const video = await ctx.db.get(args.videoId);
-    if (
-      !video ||
-      video.status !== "processing" ||
-      video.muxAssetId !== args.muxAssetId
-    ) {
+    if (!video || video.status !== "processing" || video.muxAssetId !== args.muxAssetId) {
       return false;
     }
 
@@ -707,21 +671,16 @@ export const listStaleUploadCandidates = internalQuery({
     limit: v.number(),
   },
   handler: async (ctx, args) => {
-    const candidates = (await ctx.db
-      .query("videos")
-      .withIndex("by_status_and_upload_updated_at", (q) =>
-        q.eq("status", "uploading"),
-      )
-      .take(args.limit))
+    const candidates = (
+      await ctx.db
+        .query("videos")
+        .withIndex("by_status_and_upload_updated_at", (q) => q.eq("status", "uploading"))
+        .take(args.limit)
+    )
       .filter((video) => video.s3Key && video.s3MultipartUploadId)
-      .filter(
-        (video) =>
-          (video.uploadUpdatedAt ?? video._creationTime) < args.cutoff,
-      )
+      .filter((video) => (video.uploadUpdatedAt ?? video._creationTime) < args.cutoff)
       .sort(
-        (a, b) =>
-          (a.uploadUpdatedAt ?? a._creationTime) -
-          (b.uploadUpdatedAt ?? b._creationTime),
+        (a, b) => (a.uploadUpdatedAt ?? a._creationTime) - (b.uploadUpdatedAt ?? b._creationTime),
       )
       .slice(0, args.limit);
 
@@ -817,7 +776,7 @@ export const getVideoByMuxUploadId = internalQuery({
     v.object({
       videoId: v.id("videos"),
     }),
-    v.null()
+    v.null(),
   ),
   handler: async (ctx, args): Promise<{ videoId: Id<"videos"> } | null> => {
     const video = await ctx.db
@@ -838,7 +797,7 @@ export const getVideoByMuxAssetId = internalQuery({
     v.object({
       videoId: v.id("videos"),
     }),
-    v.null()
+    v.null(),
   ),
   handler: async (ctx, args): Promise<{ videoId: Id<"videos"> } | null> => {
     const video = await ctx.db
@@ -857,11 +816,7 @@ export const getMuxProcessingState = internalQuery({
   },
   handler: async (ctx, args) => {
     const video = await ctx.db.get(args.videoId);
-    if (
-      !video ||
-      video.status !== "processing" ||
-      !video.muxAssetId
-    ) {
+    if (!video || video.status !== "processing" || !video.muxAssetId) {
       return null;
     }
 
@@ -878,9 +833,7 @@ export const claimMuxProcessingCandidates = internalMutation({
   handler: async (ctx, args) => {
     const videos = await ctx.db
       .query("videos")
-      .withIndex("by_status_and_mux_last_polled_at", (q) =>
-        q.eq("status", "processing"),
-      )
+      .withIndex("by_status_and_mux_last_polled_at", (q) => q.eq("status", "processing"))
       .filter((q) => q.neq(q.field("muxAssetId"), undefined))
       .take(args.limit);
 

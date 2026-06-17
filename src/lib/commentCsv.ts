@@ -10,9 +10,7 @@ interface CsvCommentThread extends CsvComment {
 }
 
 function escapeCsvCell(value: string) {
-  const spreadsheetSafeValue = /^\s*[=+\-@]/.test(value)
-    ? `'${value}`
-    : value;
+  const spreadsheetSafeValue = /^\s*[=+\-@]/.test(value) ? `'${value}` : value;
   return `"${spreadsheetSafeValue.replaceAll('"', '""')}"`;
 }
 
@@ -28,10 +26,9 @@ export function buildCommentsCsv(comments: CsvCommentThread[]) {
   return [
     "Timestamp,Comment",
     ...rows.map((comment) =>
-      [
-        escapeCsvCell(formatTimestamp(comment.timestampSeconds)),
-        escapeCsvCell(comment.text),
-      ].join(","),
+      [escapeCsvCell(formatTimestamp(comment.timestampSeconds)), escapeCsvCell(comment.text)].join(
+        ",",
+      ),
     ),
   ].join("\r\n");
 }

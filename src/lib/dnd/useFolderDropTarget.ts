@@ -69,9 +69,7 @@ function computeCanDrop(payload: DragPayload, ctx: CanDropContext): boolean {
  * this element) and `canDropHere` (that drag is a legal drop) so the caller can
  * render the green accept vs. red reject affordance.
  */
-export function useFolderDropTarget<T extends HTMLElement>(
-  args: UseFolderDropTargetArgs,
-) {
+export function useFolderDropTarget<T extends HTMLElement>(args: UseFolderDropTargetArgs) {
   const { targetProjectId, teamId, disabled, folders, onMove } = args;
   const ref = useRef<T | null>(null);
   const [isDraggedOver, setIsDraggedOver] = useState(false);
@@ -91,8 +89,7 @@ export function useFolderDropTarget<T extends HTMLElement>(
     const ctx = (): CanDropContext => ({
       targetProjectId: stateRef.current.targetProjectId,
       teamId: stateRef.current.teamId,
-      descendantsOf: (folderId) =>
-        collectDescendantIds(folderId, stateRef.current.folders ?? []),
+      descendantsOf: (folderId) => collectDescendantIds(folderId, stateRef.current.folders ?? []),
     });
 
     return dropTargetForElements({

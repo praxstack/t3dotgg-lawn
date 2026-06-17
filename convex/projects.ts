@@ -1,11 +1,5 @@
 import { v } from "convex/values";
-import {
-  internalMutation,
-  mutation,
-  query,
-  MutationCtx,
-  QueryCtx,
-} from "./_generated/server";
+import { internalMutation, mutation, query, MutationCtx, QueryCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
 import { getUser, requireTeamAccess, requireProjectAccess } from "./auth";
@@ -74,9 +68,7 @@ async function assertSubtreeFitsDepth(
         )
         .first();
       if (child) {
-        throw new Error(
-          `Folders can only be nested ${MAX_FOLDER_DEPTH} levels deep`,
-        );
+        throw new Error(`Folders can only be nested ${MAX_FOLDER_DEPTH} levels deep`);
       }
       continue;
     }
@@ -167,9 +159,7 @@ export const create = mutation({
       }
       const parentDepth = (await collectAncestors(ctx, parent)).length;
       if (parentDepth + 1 > MAX_FOLDER_DEPTH) {
-        throw new Error(
-          `Folders can only be nested ${MAX_FOLDER_DEPTH} levels deep`,
-        );
+        throw new Error(`Folders can only be nested ${MAX_FOLDER_DEPTH} levels deep`);
       }
     }
 
@@ -294,9 +284,7 @@ export const listUploadTargets = query({
       .withIndex("by_user", (q) => q.eq("userClerkId", user.subject))
       .collect();
 
-    const uploadableMemberships = memberships.filter(
-      (membership) => membership.role !== "viewer",
-    );
+    const uploadableMemberships = memberships.filter((membership) => membership.role !== "viewer");
 
     const targets = await Promise.all(
       uploadableMemberships.map(async (membership) => {
@@ -327,9 +315,9 @@ export const listUploadTargets = query({
 
     return targets
       .flat()
-      .sort((a, b) =>
-        a.teamName.localeCompare(b.teamName) ||
-        a.projectPath.localeCompare(b.projectPath),
+      .sort(
+        (a, b) =>
+          a.teamName.localeCompare(b.teamName) || a.projectPath.localeCompare(b.projectPath),
       );
   },
 });
@@ -381,11 +369,7 @@ export const move = mutation({
       if (args.newParentId === args.projectId) {
         throw new Error("A folder can't be moved into itself");
       }
-      const { project: newParent } = await requireProjectAccess(
-        ctx,
-        args.newParentId,
-        "member",
-      );
+      const { project: newParent } = await requireProjectAccess(ctx, args.newParentId, "member");
       if (newParent.teamId !== project.teamId) {
         throw new Error("Can't move a folder to a different team");
       }
@@ -407,9 +391,7 @@ export const move = mutation({
       const newParentDepth = (await collectAncestors(ctx, newParent)).length;
       const newDepth = newParentDepth + 1;
       if (newDepth > MAX_FOLDER_DEPTH) {
-        throw new Error(
-          `Folders can only be nested ${MAX_FOLDER_DEPTH} levels deep`,
-        );
+        throw new Error(`Folders can only be nested ${MAX_FOLDER_DEPTH} levels deep`);
       }
       if (newDepth > currentDepth) {
         await assertSubtreeFitsDepth(ctx, project, newDepth);
@@ -445,9 +427,7 @@ async function runSubtreeDeleteBatch(
   for (let steps = 0; steps < DELETE_BRANCH_WALK_LIMIT; steps++) {
     const child = await ctx.db
       .query("projects")
-      .withIndex("by_team_and_parent", (q) =>
-        q.eq("teamId", teamId).eq("parentId", leaf._id),
-      )
+      .withIndex("by_team_and_parent", (q) => q.eq("teamId", teamId).eq("parentId", leaf._id))
       .first();
     if (!child) break;
     if (visited.has(child._id)) {
@@ -459,9 +439,7 @@ async function runSubtreeDeleteBatch(
 
   const remainingChild = await ctx.db
     .query("projects")
-    .withIndex("by_team_and_parent", (q) =>
-      q.eq("teamId", teamId).eq("parentId", leaf._id),
-    )
+    .withIndex("by_team_and_parent", (q) => q.eq("teamId", teamId).eq("parentId", leaf._id))
     .first();
   if (remainingChild) {
     throw new Error("Folder tree is too deep to delete safely");
@@ -475,11 +453,7 @@ async function runSubtreeDeleteBatch(
       .first();
     if (!video) break;
 
-    const result = await deleteVideoAndDependentsBatch(
-      ctx,
-      video._id,
-      budget,
-    );
+    const result = await deleteVideoAndDependentsBatch(ctx, video._id, budget);
     budget -= result.deleted;
     if (!result.done || budget === 0) {
       return { done: false };
@@ -513,11 +487,7 @@ export const continueSubtreeDelete = internalMutation({
     rootProjectId: v.id("projects"),
   },
   handler: async (ctx, args) => {
-    const result = await runSubtreeDeleteBatch(
-      ctx,
-      args.teamId,
-      args.rootProjectId,
-    );
+    const result = await runSubtreeDeleteBatch(ctx, args.teamId, args.rootProjectId);
     if (!result.done) {
       await ctx.scheduler.runAfter(0, internal.projects.continueSubtreeDelete, args);
     }

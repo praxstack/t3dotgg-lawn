@@ -1,9 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {
-  buildCommentsCsv,
-  buildCommentsCsvFilename,
-} from "@/lib/commentCsv";
+import { buildCommentsCsv, buildCommentsCsvFilename } from "@/lib/commentCsv";
 
 test("exports comments and replies in thread order", () => {
   const csv = buildCommentsCsv([
@@ -53,7 +50,7 @@ test("escapes CSV content and neutralizes spreadsheet formulas", () => {
       ],
     },
     {
-      text: "=HYPERLINK(\"https://example.com\")",
+      text: '=HYPERLINK("https://example.com")',
       timestampSeconds: 1,
       replies: [],
     },

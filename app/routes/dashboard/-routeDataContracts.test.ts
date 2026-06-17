@@ -17,36 +17,24 @@ test("dashboard route data contracts expose expected essential queries", () => {
   const projectId = "proj_123" as Id<"projects">;
   const videoId = "vid_123" as Id<"videos">;
 
-  assert.deepEqual(names(getDashboardIndexEssentialSpecs()), [
-    "teams:listWithProjects",
-  ]);
+  assert.deepEqual(names(getDashboardIndexEssentialSpecs()), ["teams:listWithProjects"]);
 
-  assert.deepEqual(names(getTeamEssentialSpecs({ teamSlug })), [
+  assert.deepEqual(names(getTeamEssentialSpecs({ teamSlug })), ["workspace:resolveContext"]);
+
+  assert.deepEqual(names(getSettingsEssentialSpecs({ teamSlug })), ["workspace:resolveContext"]);
+
+  assert.deepEqual(names(getProjectEssentialSpecs({ teamSlug, projectId })), [
+    "projects:breadcrumb",
+    "projects:get",
+    "projects:listChildren",
+    "videos:list",
     "workspace:resolveContext",
   ]);
 
-  assert.deepEqual(names(getSettingsEssentialSpecs({ teamSlug })), [
+  assert.deepEqual(names(getVideoEssentialSpecs({ teamSlug, projectId, videoId })), [
+    "comments:getThreaded",
+    "comments:list",
+    "videos:get",
     "workspace:resolveContext",
   ]);
-
-  assert.deepEqual(
-    names(getProjectEssentialSpecs({ teamSlug, projectId })),
-    [
-      "projects:breadcrumb",
-      "projects:get",
-      "projects:listChildren",
-      "videos:list",
-      "workspace:resolveContext",
-    ],
-  );
-
-  assert.deepEqual(
-    names(getVideoEssentialSpecs({ teamSlug, projectId, videoId })),
-    [
-      "comments:getThreaded",
-      "comments:list",
-      "videos:get",
-      "workspace:resolveContext",
-    ],
-  );
 });

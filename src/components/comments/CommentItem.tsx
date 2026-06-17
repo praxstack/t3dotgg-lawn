@@ -69,35 +69,29 @@ export function CommentItem({
   return (
     <div
       className={cn(
-        "transition-all relative group",
+        "group relative transition-all",
         isReply ? "py-2" : "p-4",
-        isHighlighted
-          ? "bg-[#2d5a2d]/10"
-          : "hover:bg-[#1a1a1a]/5",
-        comment.resolved && "opacity-50"
+        isHighlighted ? "bg-[#2d5a2d]/10" : "hover:bg-[#1a1a1a]/5",
+        comment.resolved && "opacity-50",
       )}
     >
       <div className="flex items-start gap-3">
         <Avatar className="h-9 w-9 shadow-sm">
           <AvatarImage src={comment.userAvatarUrl} />
-          <AvatarFallback className="text-[10px]">
-            {getInitials(comment.userName)}
-          </AvatarFallback>
+          <AvatarFallback className="text-[10px]">{getInitials(comment.userName)}</AvatarFallback>
         </Avatar>
-        <div className="flex-1 min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="font-bold text-sm text-[#1a1a1a] truncate">
-                {comment.userName}
-              </span>
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="truncate text-sm font-bold text-[#1a1a1a]">{comment.userName}</span>
               <button
                 onClick={() => onTimestampClick(comment.timestampSeconds)}
-                className="text-xs text-[#2d5a2d] hover:text-[#1a1a1a] font-mono font-bold shrink-0"
+                className="shrink-0 font-mono text-xs font-bold text-[#2d5a2d] hover:text-[#1a1a1a]"
               >
                 {formatTimestamp(comment.timestampSeconds)}
               </button>
               {comment.resolved && (
-                <Badge variant="success" className="text-[10px] shrink-0">
+                <Badge variant="success" className="shrink-0 text-[10px]">
                   Resolved
                 </Badge>
               )}
@@ -131,10 +125,10 @@ export function CommentItem({
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
-          <p className="text-sm text-[#1a1a1a] mt-1 whitespace-pre-wrap break-words">
+          <p className="mt-1 text-sm break-words whitespace-pre-wrap text-[#1a1a1a]">
             <CommentText text={comment.text} />
           </p>
-          <p className="text-[11px] text-[#888] mt-1">
+          <p className="mt-1 text-[11px] text-[#888]">
             {formatRelativeTime(comment._creationTime)}
           </p>
         </div>

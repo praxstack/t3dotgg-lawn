@@ -23,10 +23,7 @@ function splitTrailingPunctuation(candidate: string) {
       closingCounts.set(character, (closingCounts.get(character) ?? 0) + 1);
     } else {
       for (const closing of Object.keys(CLOSING_DELIMITERS)) {
-        if (
-          character ===
-          CLOSING_DELIMITERS[closing as keyof typeof CLOSING_DELIMITERS]
-        ) {
+        if (character === CLOSING_DELIMITERS[closing as keyof typeof CLOSING_DELIMITERS]) {
           openingCounts.set(closing, (openingCounts.get(closing) ?? 0) + 1);
         }
       }
@@ -65,10 +62,7 @@ function splitTrailingPunctuation(candidate: string) {
 function isValidHttpUrl(value: string) {
   try {
     const url = new URL(value);
-    return (
-      (url.protocol === "http:" || url.protocol === "https:") &&
-      Boolean(url.hostname)
-    );
+    return (url.protocol === "http:" || url.protocol === "https:") && Boolean(url.hostname);
   } catch {
     return false;
   }

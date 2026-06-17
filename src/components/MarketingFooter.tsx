@@ -2,88 +2,67 @@ import { Link } from "@tanstack/react-router";
 
 export function MarketingFooter() {
   return (
-    <footer className="border-t-2 border-[#1a1a1a] px-6 py-16 bg-[#1a1a1a] text-[#f0f0e8]">
-      <div className="max-w-7xl mx-auto">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-12 mb-16">
+    <footer className="border-t-2 border-[#1a1a1a] bg-[#1a1a1a] px-6 py-16 text-[#f0f0e8]">
+      <div className="mx-auto max-w-7xl">
+        <div className="mb-16 grid grid-cols-2 gap-12 md:grid-cols-4">
           <div>
-            <h3 className="text-sm font-black uppercase tracking-widest text-[#888] mb-4">
+            <h3 className="mb-4 text-sm font-black tracking-widest text-[#888] uppercase">
               Product
             </h3>
             <ul className="space-y-3 text-sm font-bold">
               <li>
-                <Link
-                  to="/pricing"
-                  className="hover:text-[#7cb87c] transition-colors"
-                >
+                <Link to="/pricing" className="transition-colors hover:text-[#7cb87c]">
                   Pricing
                 </Link>
               </li>
               <li>
-                <Link
-                  to="/sign-up"
-                  className="hover:text-[#7cb87c] transition-colors"
-                >
+                <Link to="/sign-up" className="transition-colors hover:text-[#7cb87c]">
                   Start free trial
                 </Link>
               </li>
               <li>
-                <Link
-                  to="/sign-in"
-                  className="hover:text-[#7cb87c] transition-colors"
-                >
+                <Link to="/sign-in" className="transition-colors hover:text-[#7cb87c]">
                   Sign in
                 </Link>
               </li>
             </ul>
           </div>
           <div>
-            <h3 className="text-sm font-black uppercase tracking-widest text-[#888] mb-4">
+            <h3 className="mb-4 text-sm font-black tracking-widest text-[#888] uppercase">
               Compare
             </h3>
             <ul className="space-y-3 text-sm font-bold">
               <li>
-                <Link
-                  to="/compare/frameio"
-                  className="hover:text-[#7cb87c] transition-colors"
-                >
+                <Link to="/compare/frameio" className="transition-colors hover:text-[#7cb87c]">
                   lawn vs Frame.io
                 </Link>
               </li>
               <li>
-                <Link
-                  to="/compare/wipster"
-                  className="hover:text-[#7cb87c] transition-colors"
-                >
+                <Link to="/compare/wipster" className="transition-colors hover:text-[#7cb87c]">
                   lawn vs Wipster
                 </Link>
               </li>
             </ul>
           </div>
           <div>
-            <h3 className="text-sm font-black uppercase tracking-widest text-[#888] mb-4">
+            <h3 className="mb-4 text-sm font-black tracking-widest text-[#888] uppercase">
               Use cases
             </h3>
             <ul className="space-y-3 text-sm font-bold">
               <li>
-                <Link
-                  to="/for/video-editors"
-                  className="hover:text-[#7cb87c] transition-colors"
-                >
+                <Link to="/for/video-editors" className="transition-colors hover:text-[#7cb87c]">
                   For video editors
                 </Link>
               </li>
               <li>
-                <Link
-                  to="/for/agencies"
-                  className="hover:text-[#7cb87c] transition-colors"
-                >
+                <Link to="/for/agencies" className="transition-colors hover:text-[#7cb87c]">
                   For agencies
                 </Link>
               </li>
             </ul>
           </div>
           <div>
-            <h3 className="text-sm font-black uppercase tracking-widest text-[#888] mb-4">
+            <h3 className="mb-4 text-sm font-black tracking-widest text-[#888] uppercase">
               Open source
             </h3>
             <ul className="space-y-3 text-sm font-bold">
@@ -92,7 +71,7 @@ export function MarketingFooter() {
                   href="https://github.com/pingdotgg/lawn"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="hover:text-[#7cb87c] transition-colors"
+                  className="transition-colors hover:text-[#7cb87c]"
                 >
                   GitHub
                 </a>
@@ -100,11 +79,9 @@ export function MarketingFooter() {
             </ul>
           </div>
         </div>
-        <div className="border-t border-[#333] pt-8 flex flex-col md:flex-row justify-between items-center gap-4">
-          <span className="font-black text-3xl tracking-tighter">lawn.</span>
-          <span className="text-sm text-[#888]">
-            Video review for creative teams.
-          </span>
+        <div className="flex flex-col items-center justify-between gap-4 border-t border-[#333] pt-8 md:flex-row">
+          <span className="text-3xl font-black tracking-tighter">lawn.</span>
+          <span className="text-sm text-[#888]">Video review for creative teams.</span>
         </div>
       </div>
     </footer>

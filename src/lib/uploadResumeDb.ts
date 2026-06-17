@@ -74,14 +74,10 @@ function runTransaction<T>(
           resolve(result);
         };
         transaction.onerror = () => {
-          rejectOnce(
-            transaction.error ?? new Error("Upload resume DB transaction failed"),
-          );
+          rejectOnce(transaction.error ?? new Error("Upload resume DB transaction failed"));
         };
         transaction.onabort = () => {
-          rejectOnce(
-            transaction.error ?? new Error("Upload resume DB transaction aborted"),
-          );
+          rejectOnce(transaction.error ?? new Error("Upload resume DB transaction aborted"));
         };
       }),
   );
@@ -89,9 +85,7 @@ function runTransaction<T>(
 
 export async function saveUploadResumeSession(session: MultipartUploadResumeSession) {
   try {
-    await runTransaction("readwrite", (store) =>
-      store.put({ ...session, updatedAt: Date.now() }),
-    );
+    await runTransaction("readwrite", (store) => store.put({ ...session, updatedAt: Date.now() }));
   } catch {
     // Resume persistence is best-effort and must not block uploads.
   }
@@ -120,9 +114,8 @@ export async function findUploadResumeSessionByFingerprint(
   projectId: Id<"projects">,
 ) {
   try {
-    const allSessions = await runTransaction<MultipartUploadResumeSession[]>(
-      "readonly",
-      (store) => store.getAll(),
+    const allSessions = await runTransaction<MultipartUploadResumeSession[]>("readonly", (store) =>
+      store.getAll(),
     );
     const cutoff = Date.now() - RESUME_SESSION_MAX_AGE_MS;
     await Promise.all(
@@ -130,9 +123,8 @@ export async function findUploadResumeSessionByFingerprint(
         .filter((session) => session.updatedAt < cutoff)
         .map((session) => deleteUploadResumeSession(session.videoId)),
     );
-    const sessions = await runTransaction<MultipartUploadResumeSession[]>(
-      "readonly",
-      (store) => store.index("by_fingerprint").getAll(fingerprint),
+    const sessions = await runTransaction<MultipartUploadResumeSession[]>("readonly", (store) =>
+      store.index("by_fingerprint").getAll(fingerprint),
     );
     return sessions
       .filter((session) => session.updatedAt >= cutoff)

@@ -103,17 +103,17 @@ export function ProjectCard({
     <Card
       ref={setCardRef}
       className={cn(
-        "group cursor-pointer hover:bg-[#e8e8e0] transition-colors",
-        isDragging && "opacity-50 border-dashed",
+        "group cursor-pointer transition-colors hover:bg-[#e8e8e0]",
+        isDragging && "border-dashed opacity-50",
         isDraggedOver && canDropHere && "border-[#2d5a2d] bg-[#2d5a2d]/10",
-        isDraggedOver && !canDropHere && "border-[#dc2626] [cursor:no-drop]",
+        isDraggedOver && !canDropHere && "[cursor:no-drop] border-[#dc2626]",
       )}
       onClick={onOpen}
       {...prewarmIntentHandlers}
     >
       <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
-        <div className="flex-1 min-w-0">
-          <CardTitle className="text-base truncate">{project.name}</CardTitle>
+        <div className="min-w-0 flex-1">
+          <CardTitle className="truncate text-base">{project.name}</CardTitle>
           <CardDescription className="mt-1">
             {formatProjectMeta(project.videoCount, project.subfolderCount)}
           </CardDescription>
@@ -124,7 +124,7 @@ export function ProjectCard({
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8 opacity-100 md:opacity-0 md:group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
+                className="h-8 w-8 opacity-100 transition-opacity group-focus-within:opacity-100 md:opacity-0 md:group-hover:opacity-100"
               >
                 <MoreVertical className="h-4 w-4" />
               </Button>
@@ -158,7 +158,7 @@ export function ProjectCard({
         )}
       </CardHeader>
       <CardContent>
-        <div className="flex items-center justify-between text-sm text-[#888] group-hover:text-[#1a1a1a] transition-colors">
+        <div className="flex items-center justify-between text-sm text-[#888] transition-colors group-hover:text-[#1a1a1a]">
           <span>Open project</span>
           <ArrowRight className="h-4 w-4" />
         </div>

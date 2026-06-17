@@ -1,6 +1,13 @@
 import { v } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
-import { getUser, identityAvatarUrl, identityEmail, identityName, requireUser, requireTeamAccess } from "./auth";
+import {
+  getUser,
+  identityAvatarUrl,
+  identityEmail,
+  identityName,
+  requireUser,
+  requireTeamAccess,
+} from "./auth";
 import { getTeamSubscriptionState } from "./billingHelpers";
 import { deleteVideoAndDependents } from "./videos";
 
@@ -87,7 +94,7 @@ export const list = query({
       memberships.map(async (membership) => {
         const team = await ctx.db.get(membership.teamId);
         return team ? { ...team, role: membership.role } : null;
-      })
+      }),
     );
 
     return teams.filter((t): t is NonNullable<typeof t> => Boolean(t));
@@ -109,7 +116,7 @@ export const listWithProjects = query({
       memberships.map(async (membership) => {
         const team = await ctx.db.get(membership.teamId);
         if (!team) return null;
-        
+
         // Only root folders show on the dashboard home; nested folders are
         // reached by drilling into their parent.
         const projects = await ctx.db
@@ -137,11 +144,11 @@ export const listWithProjects = query({
               videoCount: videos.length,
               subfolderCount: subfolders.length,
             };
-          })
+          }),
         );
-          
+
         return { ...team, role: membership.role, projects: projectsWithCounts };
-      })
+      }),
     );
 
     return teams.filter((t): t is NonNullable<typeof t> => Boolean(t));
@@ -205,7 +212,7 @@ export const inviteMember = mutation({
     const existingMembership = await ctx.db
       .query("teamMembers")
       .withIndex("by_team_and_email", (q) =>
-        q.eq("teamId", args.teamId).eq("userEmail", inviteEmail)
+        q.eq("teamId", args.teamId).eq("userEmail", inviteEmail),
       )
       .unique();
 
@@ -279,7 +286,7 @@ export const acceptInvite = mutation({
     const existingMembership = await ctx.db
       .query("teamMembers")
       .withIndex("by_team_and_user", (q) =>
-        q.eq("teamId", invite.teamId).eq("userClerkId", user.subject)
+        q.eq("teamId", invite.teamId).eq("userClerkId", user.subject),
       )
       .unique();
 

@@ -1,4 +1,3 @@
-
 import { useConvex, useMutation, useAction } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
@@ -15,10 +14,7 @@ import {
   type VideoWorkflowStatus,
 } from "@/components/videos/VideoWorkflowStatusControl";
 import { formatDuration } from "@/lib/utils";
-import {
-  buildCommentsCsv,
-  buildCommentsCsvFilename,
-} from "@/lib/commentCsv";
+import { buildCommentsCsv, buildCommentsCsvFilename } from "@/lib/commentCsv";
 import { triggerTextDownload } from "@/lib/download";
 import { useVideoPresence } from "@/lib/useVideoPresence";
 import { VideoWatchers } from "@/components/presence/VideoWatchers";
@@ -93,13 +89,13 @@ export default function VideoPage() {
   const playbackUrl = playbackSession?.url ?? null;
   const activePlaybackUrl =
     preferredSource === "mux720"
-      ? playbackUrl ?? originalPlaybackUrl
-      : originalPlaybackUrl ?? playbackUrl;
+      ? (playbackUrl ?? originalPlaybackUrl)
+      : (originalPlaybackUrl ?? playbackUrl);
   const activeQualityId =
-    activePlaybackUrl && playbackUrl && activePlaybackUrl === playbackUrl
-      ? "mux720"
-      : "original";
-  const isUsingOriginalFallback = Boolean(activePlaybackUrl && activePlaybackUrl === originalPlaybackUrl && !playbackUrl);
+    activePlaybackUrl && playbackUrl && activePlaybackUrl === playbackUrl ? "mux720" : "original";
+  const isUsingOriginalFallback = Boolean(
+    activePlaybackUrl && activePlaybackUrl === originalPlaybackUrl && !playbackUrl,
+  );
   const shouldCanonicalize =
     !!context && !context.isCanonical && pathname !== context.canonicalPath;
   const prewarmTeamIntentHandlers = useRoutePrewarmIntent(() =>
@@ -124,11 +120,7 @@ export default function VideoPage() {
   }, [shouldCanonicalize, context, navigate]);
 
   useEffect(() => {
-    if (
-      !resolvedVideoId ||
-      video?.status !== "processing" ||
-      !video.muxAssetId
-    ) {
+    if (!resolvedVideoId || video?.status !== "processing" || !video.muxAssetId) {
       return;
     }
 
@@ -155,12 +147,7 @@ export default function VideoPage() {
         window.clearTimeout(timeoutId);
       }
     };
-  }, [
-    checkMuxAssetStatus,
-    resolvedVideoId,
-    video?.muxAssetId,
-    video?.status,
-  ]);
+  }, [checkMuxAssetStatus, resolvedVideoId, video?.muxAssetId, video?.status]);
 
   useEffect(() => {
     if (!resolvedVideoId || !isPlayable) {
@@ -245,16 +232,13 @@ export default function VideoPage() {
       playerRef.current?.seekTo(time);
       setHighlightedCommentId(undefined);
     },
-    [playerRef, setHighlightedCommentId]
+    [playerRef, setHighlightedCommentId],
   );
 
   const handleExportComments = useCallback(() => {
     if (!video || !commentsThreaded?.length) return;
 
-    triggerTextDownload(
-      buildCommentsCsv(commentsThreaded),
-      buildCommentsCsvFilename(video.title),
-    );
+    triggerTextDownload(buildCommentsCsv(commentsThreaded), buildCommentsCsvFilename(video.title));
   }, [commentsThreaded, video]);
 
   const handleSaveTitle = async () => {
@@ -288,7 +272,7 @@ export default function VideoPage() {
 
   if (context === undefined || video === undefined || shouldCanonicalize) {
     return (
-      <div className="flex items-center justify-center h-full">
+      <div className="flex h-full items-center justify-center">
         <div className="text-[#888]">Loading...</div>
       </div>
     );
@@ -296,7 +280,7 @@ export default function VideoPage() {
 
   if (context === null || video === null || !resolvedProjectId || !resolvedVideoId) {
     return (
-      <div className="flex items-center justify-center h-full">
+      <div className="flex h-full items-center justify-center">
         <div className="text-[#888]">Video not found</div>
       </div>
     );
@@ -306,73 +290,73 @@ export default function VideoPage() {
   const canComment = true;
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="flex h-full flex-col">
       {/* Header */}
-      <DashboardHeader paths={[
-        {
-          label: resolvedTeamSlug,
-          href: teamHomePath(resolvedTeamSlug),
-          prewarmIntentHandlers: prewarmTeamIntentHandlers,
-        },
-        {
-          label: context?.project?.name ?? "project",
-          href: projectPath(resolvedTeamSlug, resolvedProjectId),
-          prewarmIntentHandlers: prewarmProjectIntentHandlers,
-        },
-        { 
-          label: isEditingTitle ? (
-            <div className="flex items-center gap-2">
-              <Input
-                value={editedTitle}
-                onChange={(e) => setEditedTitle(e.target.value)}
-                className="w-40 sm:w-64 h-8 text-base font-black tracking-tighter uppercase font-mono"
-                autoFocus
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleSaveTitle();
-                  if (e.key === "Escape") setIsEditingTitle(false);
-                }}
-              />
-              <Button size="icon" variant="ghost" className="h-8 w-8" onClick={handleSaveTitle}>
-                <Check className="h-4 w-4" />
-              </Button>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-8 w-8"
-                onClick={() => setIsEditingTitle(false)}
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              <span className="truncate max-w-[150px] sm:max-w-[300px]">{video.title}</span>
-              {canEdit && (
+      <DashboardHeader
+        paths={[
+          {
+            label: resolvedTeamSlug,
+            href: teamHomePath(resolvedTeamSlug),
+            prewarmIntentHandlers: prewarmTeamIntentHandlers,
+          },
+          {
+            label: context?.project?.name ?? "project",
+            href: projectPath(resolvedTeamSlug, resolvedProjectId),
+            prewarmIntentHandlers: prewarmProjectIntentHandlers,
+          },
+          {
+            label: isEditingTitle ? (
+              <div className="flex items-center gap-2">
+                <Input
+                  value={editedTitle}
+                  onChange={(e) => setEditedTitle(e.target.value)}
+                  className="h-8 w-40 font-mono text-base font-black tracking-tighter uppercase sm:w-64"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSaveTitle();
+                    if (e.key === "Escape") setIsEditingTitle(false);
+                  }}
+                />
+                <Button size="icon" variant="ghost" className="h-8 w-8" onClick={handleSaveTitle}>
+                  <Check className="h-4 w-4" />
+                </Button>
                 <Button
                   size="icon"
                   variant="ghost"
-                  className="h-6 w-6"
-                  onClick={startEditingTitle}
+                  className="h-8 w-8"
+                  onClick={() => setIsEditingTitle(false)}
                 >
-                  <Edit2 className="h-3 w-3" />
+                  <X className="h-4 w-4" />
                 </Button>
-              )}
-              {video.status !== "ready" && (
-                <Badge
-                  variant={video.status === "failed" ? "destructive" : "secondary"}
-                >
-                  {video.status === "uploading" && "Uploading"}
-                  {video.status === "processing" && "Processing"}
-                  {video.status === "failed" && "Failed"}
-                </Badge>
-              )}
-            </div>
-          )
-        }
-      ]}>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="max-w-[150px] truncate sm:max-w-[300px]">{video.title}</span>
+                {canEdit && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-6 w-6"
+                    onClick={startEditingTitle}
+                  >
+                    <Edit2 className="h-3 w-3" />
+                  </Button>
+                )}
+                {video.status !== "ready" && (
+                  <Badge variant={video.status === "failed" ? "destructive" : "secondary"}>
+                    {video.status === "uploading" && "Uploading"}
+                    {video.status === "processing" && "Processing"}
+                    {video.status === "failed" && "Failed"}
+                  </Badge>
+                )}
+              </div>
+            ),
+          },
+        ]}
+      >
         {/* Desktop: inline actions */}
-        <div className="hidden sm:flex items-center gap-3 text-xs text-[#888]">
-          <span className="truncate max-w-[100px]">{video.uploaderName}</span>
+        <div className="hidden items-center gap-3 text-xs text-[#888] sm:flex">
+          <span className="max-w-[100px] truncate">{video.uploaderName}</span>
           {video.duration && (
             <>
               <span className="text-[#ccc]">·</span>
@@ -381,7 +365,7 @@ export default function VideoPage() {
           )}
           <VideoWatchers watchers={watchers} />
         </div>
-        <div className="hidden sm:flex items-center gap-3 flex-shrink-0 border-l-2 border-[#1a1a1a]/20 pl-3 ml-1">
+        <div className="ml-1 hidden flex-shrink-0 items-center gap-3 border-l-2 border-[#1a1a1a]/20 pl-3 sm:flex">
           <VideoWorkflowStatusControl
             status={video.workflowStatus}
             size="lg"
@@ -407,7 +391,7 @@ export default function VideoPage() {
         </div>
 
         {/* Mobile: workflow status + menu button */}
-        <div className="flex sm:hidden items-center gap-2">
+        <div className="flex items-center gap-2 sm:hidden">
           <VideoWorkflowStatusControl
             status={video.workflowStatus}
             size="lg"
@@ -422,26 +406,26 @@ export default function VideoPage() {
                 <MoreVertical className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={() => setShareDialogOpen(true)}>
-              <LinkIcon className="mr-2 h-4 w-4" />
-              Share
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setMobileCommentsOpen(true)}>
-              <MessageSquare className="mr-2 h-4 w-4" />
-              Comments{comments && comments.length > 0 ? ` (${comments.length})` : ""}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => setShareDialogOpen(true)}>
+                <LinkIcon className="mr-2 h-4 w-4" />
+                Share
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setMobileCommentsOpen(true)}>
+                <MessageSquare className="mr-2 h-4 w-4" />
+                Comments{comments && comments.length > 0 ? ` (${comments.length})` : ""}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
           </DropdownMenu>
         </div>
       </DashboardHeader>
 
       {/* Main content - horizontal split */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex flex-1 overflow-hidden">
         {/* Video player area — full black, Frame.io style */}
-        <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-black">
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-black">
           {video.status === "processing" && isUsingOriginalFallback && activePlaybackUrl ? (
-            <div className="flex-shrink-0 flex items-center gap-2 bg-[#171c17] px-4 py-2 text-sm text-[#e7ede4]">
+            <div className="flex flex-shrink-0 items-center gap-2 bg-[#171c17] px-4 py-2 text-sm text-[#e7ede4]">
               <span className="inline-flex h-2.5 w-2.5 animate-pulse rounded-full bg-[#7cb87c]" />
               <span className="font-semibold">Original playback active.</span>
               <span className="text-[#aeb9ac]">720p stream is still encoding.</span>
@@ -480,7 +464,7 @@ export default function VideoPage() {
               }}
             />
           ) : (
-            <div className="flex-1 flex items-center justify-center">
+            <div className="flex flex-1 items-center justify-center">
               {video.status === "ready" && !playbackUrl ? (
                 <div className="flex flex-col items-center gap-3 text-white">
                   <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
@@ -490,9 +474,7 @@ export default function VideoPage() {
                 </div>
               ) : (
                 <div className="text-center">
-                  {video.status === "uploading" && (
-                    <p className="text-white/60">Uploading...</p>
-                  )}
+                  {video.status === "uploading" && <p className="text-white/60">Uploading...</p>}
                   {video.status === "processing" && (
                     <p className="text-white/60">
                       {isLoadingOriginalPlayback
@@ -500,9 +482,7 @@ export default function VideoPage() {
                         : "Processing video..."}
                     </p>
                   )}
-                  {video.status === "failed" && (
-                    <p className="text-[#dc2626]">Processing failed</p>
-                  )}
+                  {video.status === "failed" && <p className="text-[#dc2626]">Processing failed</p>}
                 </div>
               )}
             </div>
@@ -510,15 +490,15 @@ export default function VideoPage() {
         </div>
 
         {/* Comments sidebar — desktop */}
-        <aside className="hidden lg:flex w-80 xl:w-96 border-l-2 border-[#1a1a1a] flex-col bg-[#f0f0e8]">
-          <div className="flex-shrink-0 px-5 py-4 border-b border-[#1a1a1a]/10 dark:border-white/10 flex items-center justify-between">
-            <h2 className="font-semibold text-sm tracking-tight flex items-center gap-2 text-[#1a1a1a] dark:text-[#f0f0e8]">
+        <aside className="hidden w-80 flex-col border-l-2 border-[#1a1a1a] bg-[#f0f0e8] lg:flex xl:w-96">
+          <div className="flex flex-shrink-0 items-center justify-between border-b border-[#1a1a1a]/10 px-5 py-4 dark:border-white/10">
+            <h2 className="flex items-center gap-2 text-sm font-semibold tracking-tight text-[#1a1a1a] dark:text-[#f0f0e8]">
               Discussion
             </h2>
             <div className="flex items-center gap-2">
               {comments && comments.length > 0 && (
-                <span className="text-[11px] font-medium text-[#888] bg-[#1a1a1a]/5 dark:bg-white/5 px-2 py-0.5 rounded-full">
-                  {comments.length} {comments.length === 1 ? 'comment' : 'comments'}
+                <span className="rounded-full bg-[#1a1a1a]/5 px-2 py-0.5 text-[11px] font-medium text-[#888] dark:bg-white/5">
+                  {comments.length} {comments.length === 1 ? "comment" : "comments"}
                 </span>
               )}
               <Button
@@ -557,12 +537,12 @@ export default function VideoPage() {
 
       {/* Comments overlay — mobile */}
       {mobileCommentsOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden flex flex-col bg-[#f0f0e8]">
-          <div className="flex-shrink-0 px-5 py-4 border-b-2 border-[#1a1a1a] flex items-center justify-between">
-            <h2 className="font-semibold text-sm tracking-tight flex items-center gap-2 text-[#1a1a1a]">
+        <div className="fixed inset-0 z-50 flex flex-col bg-[#f0f0e8] lg:hidden">
+          <div className="flex flex-shrink-0 items-center justify-between border-b-2 border-[#1a1a1a] px-5 py-4">
+            <h2 className="flex items-center gap-2 text-sm font-semibold tracking-tight text-[#1a1a1a]">
               Discussion
               {comments && comments.length > 0 && (
-                <span className="text-[11px] font-medium text-[#888] bg-[#1a1a1a]/5 px-2 py-0.5 rounded-full">
+                <span className="rounded-full bg-[#1a1a1a]/5 px-2 py-0.5 text-[11px] font-medium text-[#888]">
                   {comments.length}
                 </span>
               )}

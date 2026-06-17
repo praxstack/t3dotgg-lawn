@@ -45,27 +45,20 @@ export function UploadProgress({
   onRetryProcessing,
 }: UploadProgressProps) {
   return (
-    <div className="border-2 border-[#1a1a1a] p-4 bg-[#f0f0e8]">
+    <div className="border-2 border-[#1a1a1a] bg-[#f0f0e8] p-4">
       <div className="flex items-start justify-between gap-4">
-        <div className="flex-1 min-w-0">
-          <p className="font-bold text-[#1a1a1a] truncate text-sm">{fileName}</p>
-          <p className="text-xs text-[#888] mt-0.5">
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-bold text-[#1a1a1a]">{fileName}</p>
+          <p className="mt-0.5 text-xs text-[#888]">
             {formatBytes(fileSize)}
             {resuming ? " · Resuming" : ""}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {status === "complete" && (
-            <CheckCircle className="h-5 w-5 text-[#2d5a2d]" />
-          )}
-          {status === "error" && (
-            <AlertCircle className="h-5 w-5 text-[#dc2626]" />
-          )}
-          {status === "processing" && (
-            <Loader2 className="h-5 w-5 text-[#2d5a2d] animate-spin" />
-          )}
-          {(status === "pending" || status === "uploading" || status === "error") &&
-            onCancel && (
+          {status === "complete" && <CheckCircle className="h-5 w-5 text-[#2d5a2d]" />}
+          {status === "error" && <AlertCircle className="h-5 w-5 text-[#dc2626]" />}
+          {status === "processing" && <Loader2 className="h-5 w-5 animate-spin text-[#2d5a2d]" />}
+          {(status === "pending" || status === "uploading" || status === "error") && onCancel && (
             <Button
               variant="ghost"
               size="icon"
@@ -81,21 +74,22 @@ export function UploadProgress({
       {status === "uploading" && (
         <div className="mt-3 space-y-1.5">
           <Progress value={progress} />
-          <div className="flex justify-between text-xs text-[#888] font-mono">
+          <div className="flex justify-between font-mono text-xs text-[#888]">
             <span>{formatSpeed(bytesPerSecond)}</span>
             <span>
               {progress}%
               {estimatedSecondsRemaining !== null && estimatedSecondsRemaining > 0 && (
-                <span className="text-[#888]"> · {formatTimeRemaining(estimatedSecondsRemaining)} left</span>
+                <span className="text-[#888]">
+                  {" "}
+                  · {formatTimeRemaining(estimatedSecondsRemaining)} left
+                </span>
               )}
             </span>
           </div>
         </div>
       )}
 
-      {status === "processing" && (
-        <p className="text-xs text-[#888] mt-2">Processing video...</p>
-      )}
+      {status === "processing" && <p className="mt-2 text-xs text-[#888]">Processing video...</p>}
 
       {status === "error" && error && (
         <div className="mt-2 space-y-2">

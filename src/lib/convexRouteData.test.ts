@@ -3,9 +3,7 @@ import assert from "node:assert/strict";
 import type { ConvexReactClient } from "convex/react";
 import { getFunctionName } from "convex/server";
 import { api } from "@convex/_generated/api";
-import {
-  createRoutePrewarmIntent,
-} from "@/lib/useRoutePrewarmIntent";
+import { createRoutePrewarmIntent } from "@/lib/useRoutePrewarmIntent";
 import {
   makeRouteQuerySpec,
   prewarmSpecs,
@@ -62,7 +60,13 @@ test("team dependent prewarm skips dependent query when resolveContext has no te
   const calls: Array<{ name: string; args: unknown }> = [];
 
   const convex = {
-    prewarmQuery: ({ query, args }: { query: typeof api.workspace.resolveContext; args: unknown }) => {
+    prewarmQuery: ({
+      query,
+      args,
+    }: {
+      query: typeof api.workspace.resolveContext;
+      args: unknown;
+    }) => {
       calls.push({ name: getFunctionName(query), args });
     },
     query: async () => null,

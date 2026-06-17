@@ -1,9 +1,4 @@
-import {
-  HeadContent,
-  Outlet,
-  Scripts,
-  createRootRoute,
-} from "@tanstack/react-router";
+import { HeadContent, Outlet, Scripts, createRootRoute } from "@tanstack/react-router";
 import { ClerkProvider } from "@clerk/tanstack-react-start";
 import type { ReactNode } from "react";
 
@@ -41,11 +36,11 @@ export const Route = createRootRoute({
   component: RootComponent,
   errorComponent: ({ error }) => {
     return (
-      <main className="pt-16 p-4 container mx-auto">
+      <main className="container mx-auto p-4 pt-16">
         <h1>Error</h1>
         <p>{error instanceof Error ? error.message : "An unexpected error occurred."}</p>
         {import.meta.env.DEV && error instanceof Error && error.stack ? (
-          <pre className="w-full p-4 overflow-x-auto">
+          <pre className="w-full overflow-x-auto p-4">
             <code>{error.stack}</code>
           </pre>
         ) : null}

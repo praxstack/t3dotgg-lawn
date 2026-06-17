@@ -58,11 +58,7 @@ export function useRoutePrewarmIntent(
   prewarmRef.current = prewarmFn;
 
   const controller = useMemo(
-    () =>
-      createRoutePrewarmIntent(
-        () => prewarmRef.current(),
-        options,
-      ),
+    () => createRoutePrewarmIntent(() => prewarmRef.current(), options),
     [options.debounceMs],
   );
 

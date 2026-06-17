@@ -41,8 +41,7 @@ export function isResumableUploadError(error: unknown) {
 export function isProcessingRetryError(error: unknown) {
   return (
     error instanceof ProcessingRetryError ||
-    (error instanceof Error &&
-      error.message.includes("Mux ingest failed after upload."))
+    (error instanceof Error && error.message.includes("Mux ingest failed after upload."))
   );
 }
 
@@ -156,10 +155,7 @@ function uploadPartWithXhr(
         return;
       }
       rejectOnce(
-        new UploadPartError(
-          `Upload part failed: ${xhr.status} ${xhr.statusText}`,
-          xhr.status,
-        ),
+        new UploadPartError(`Upload part failed: ${xhr.status} ${xhr.statusText}`, xhr.status),
       );
     });
 
@@ -220,12 +216,7 @@ async function uploadPartWithRetry(args: {
 
   for (let attempt = 1; attempt <= MAX_PART_UPLOAD_ATTEMPTS; attempt += 1) {
     try {
-      return await uploadPartWithXhr(
-        url,
-        args.blob,
-        args.signal,
-        args.onProgress,
-      );
+      return await uploadPartWithXhr(url, args.blob, args.signal, args.onProgress);
     } catch (error) {
       lastError = error;
       if (
@@ -250,10 +241,7 @@ async function uploadPartWithRetry(args: {
       }
 
       const jitter = Math.floor(Math.random() * PART_RETRY_BASE_DELAY_MS);
-      await waitForRetry(
-        PART_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1) + jitter,
-        args.signal,
-      );
+      await waitForRetry(PART_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1) + jitter, args.signal);
     }
   }
 
@@ -360,11 +348,7 @@ function mergeUploadedParts(...partGroups: UploadedPart[][]) {
     .map(([partNumber, etag]) => ({ partNumber, etag }));
 }
 
-function getPartByteRange(
-  fileSize: number,
-  partSizeBytes: number,
-  partNumber: number,
-) {
+function getPartByteRange(fileSize: number, partSizeBytes: number, partNumber: number) {
   const start = (partNumber - 1) * partSizeBytes;
   const end = Math.min(start + partSizeBytes, fileSize);
   return { start, end };
@@ -462,9 +446,7 @@ async function uploadMultipartFile(args: {
     initiate.uploadedParts,
     canReuseResumeSession ? resumeSession.completedParts : [],
   );
-  const completedMap = new Map(
-    completedParts.map((part) => [part.partNumber, part.etag] as const),
-  );
+  const completedMap = new Map(completedParts.map((part) => [part.partNumber, part.etag] as const));
 
   const pendingPartNumbers = Array.from(
     { length: initiate.partCount },
@@ -489,10 +471,7 @@ async function uploadMultipartFile(args: {
     if (!force && now - lastReportedAt < 100) return;
     lastReportedAt = now;
 
-    const inFlightBytes = [...inFlightLoaded.values()].reduce(
-      (sum, loaded) => sum + loaded,
-      0,
-    );
+    const inFlightBytes = [...inFlightLoaded.values()].reduce((sum, loaded) => sum + loaded, 0);
     const totalLoaded = Math.min(file.size, bytesUploaded + inFlightBytes);
     const percentage = Math.min(100, Math.round((totalLoaded / file.size) * 100));
     const timeDelta = (now - lastTime) / 1000;
@@ -525,7 +504,7 @@ async function uploadMultipartFile(args: {
     fileName: file.name,
     fileSize: file.size,
     fileLastModified: file.lastModified,
-    fileFingerprint: fileFingerprint ?? await buildFileFingerprint(file),
+    fileFingerprint: fileFingerprint ?? (await buildFileFingerprint(file)),
     strategy: "multipart",
     uploadId: initiate.uploadId,
     s3Key: initiate.key,
@@ -631,9 +610,7 @@ export async function uploadVideoFile(args: {
   fileFingerprint?: string;
 }) {
   if (isFileTooLarge(args.file.size)) {
-    throw new Error(
-      `Video file is too large. Maximum size is ${formatMaxUploadSize()}.`,
-    );
+    throw new Error(`Video file is too large. Maximum size is ${formatMaxUploadSize()}.`);
   }
 
   const contentType = args.file.type || "video/mp4";

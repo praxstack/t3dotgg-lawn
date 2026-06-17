@@ -30,11 +30,7 @@ type DashboardProjectCardProps = {
   onOpen: () => void;
 };
 
-function formatTeamPlanLabel(
-  plan: string,
-  billingStatus?: string,
-  stripeSubscriptionId?: string,
-) {
+function formatTeamPlanLabel(plan: string, billingStatus?: string, stripeSubscriptionId?: string) {
   if (!stripeSubscriptionId && billingStatus !== "active") {
     return "Unpaid";
   }
@@ -51,11 +47,7 @@ function formatTeamPlanLabel(
   return "Basic";
 }
 
-function DashboardProjectCard({
-  teamSlug,
-  project,
-  onOpen,
-}: DashboardProjectCardProps) {
+function DashboardProjectCard({ teamSlug, project, onOpen }: DashboardProjectCardProps) {
   const convex = useConvex();
   const prewarmIntentHandlers = useRoutePrewarmIntent(() =>
     prewarmProject(convex, {
@@ -66,20 +58,20 @@ function DashboardProjectCard({
 
   return (
     <Card
-      className="group cursor-pointer hover:bg-[#e8e8e0] transition-colors"
+      className="group cursor-pointer transition-colors hover:bg-[#e8e8e0]"
       onClick={onOpen}
       {...prewarmIntentHandlers}
     >
       <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
-        <div className="flex-1 min-w-0">
-          <CardTitle className="text-base truncate">{project.name}</CardTitle>
+        <div className="min-w-0 flex-1">
+          <CardTitle className="truncate text-base">{project.name}</CardTitle>
           <CardDescription className="mt-1">
             {formatProjectMeta(project.videoCount, project.subfolderCount)}
           </CardDescription>
         </div>
       </CardHeader>
       <CardContent>
-        <div className="flex items-center justify-between text-sm text-[#888] group-hover:text-[#1a1a1a] transition-colors">
+        <div className="flex items-center justify-between text-sm text-[#888] transition-colors group-hover:text-[#1a1a1a]">
           <span>Open project</span>
           <ArrowRight className="h-4 w-4" />
         </div>
@@ -98,13 +90,13 @@ export default function DashboardPage() {
   // Empty state - no teams
   if (teams && teams.length === 0) {
     return (
-      <div className="h-full flex flex-col">
+      <div className="flex h-full flex-col">
         <DashboardHeader paths={[{ label: "dashboard" }]} />
 
-        <div className="flex-1 flex items-center justify-center p-8 animate-in fade-in duration-300">
-          <Card className="max-w-sm w-full text-center">
+        <div className="animate-in fade-in flex flex-1 items-center justify-center p-8 duration-300">
+          <Card className="w-full max-w-sm text-center">
             <CardHeader>
-              <div className="mx-auto w-12 h-12 bg-[#e8e8e0] flex items-center justify-center mb-2">
+              <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center bg-[#e8e8e0]">
                 <Users className="h-6 w-6 text-[#888]" />
               </div>
               <CardTitle className="text-lg">Create your first team</CardTitle>
@@ -113,10 +105,7 @@ export default function DashboardPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Button
-                className="w-full"
-                onClick={() => setCreateDialogOpen(true)}
-              >
+              <Button className="w-full" onClick={() => setCreateDialogOpen(true)}>
                 <Plus className="mr-1.5 h-4 w-4" />
                 Create a team
               </Button>
@@ -124,16 +113,13 @@ export default function DashboardPage() {
           </Card>
         </div>
 
-        <CreateTeamDialog
-          open={createDialogOpen}
-          onOpenChange={setCreateDialogOpen}
-        />
+        <CreateTeamDialog open={createDialogOpen} onOpenChange={setCreateDialogOpen} />
       </div>
     );
   }
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="flex h-full flex-col">
       <DashboardHeader paths={[{ label: "dashboard" }]}>
         <Button onClick={() => setCreateDialogOpen(true)}>
           <Plus className="mr-1.5 h-4 w-4" />
@@ -141,18 +127,15 @@ export default function DashboardPage() {
         </Button>
       </DashboardHeader>
 
-      <div className="flex-1 overflow-auto p-6 space-y-12">
+      <div className="flex-1 space-y-12 overflow-auto p-6">
         <div
-          className={cn(
-            "transition-opacity duration-300",
-            isLoading ? "opacity-0" : "opacity-100"
-          )}
+          className={cn("transition-opacity duration-300", isLoading ? "opacity-0" : "opacity-100")}
         >
           {teams?.map((team) => {
             if (!team) return null;
             return (
               <div key={team._id} className="mb-12 last:mb-0">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-6">
+                <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-3">
                     <h2 className="text-xl font-black text-[#1a1a1a]">{team.name}</h2>
                     <Badge variant="secondary">
@@ -166,23 +149,23 @@ export default function DashboardPage() {
                   <div className="flex items-center gap-4">
                     <Link
                       to={teamSettingsPath(team.slug)}
-                      className="text-[#888] hover:text-[#1a1a1a] text-sm font-bold transition-colors"
+                      className="text-sm font-bold text-[#888] transition-colors hover:text-[#1a1a1a]"
                     >
                       Billing
                     </Link>
                     <Link
                       to={teamHomePath(team.slug)}
-                      className="text-[#888] hover:text-[#1a1a1a] text-sm font-bold flex items-center gap-1 transition-colors"
+                      className="flex items-center gap-1 text-sm font-bold text-[#888] transition-colors hover:text-[#1a1a1a]"
                     >
                       Manage team <ArrowRight className="h-3.5 w-3.5" />
                     </Link>
                   </div>
                 </div>
-                
+
                 {team.projects.length === 0 ? (
                   <Card className="max-w-sm text-center">
                     <CardHeader>
-                      <div className="mx-auto w-12 h-12 bg-[#e8e8e0] flex items-center justify-center mb-2">
+                      <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center bg-[#e8e8e0]">
                         <Folder className="h-6 w-6 text-[#888]" />
                       </div>
                       <CardTitle className="text-lg">No projects yet</CardTitle>
@@ -201,7 +184,7 @@ export default function DashboardPage() {
                     </CardContent>
                   </Card>
                 ) : (
-                  <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                     {team.projects.map((project) => (
                       <DashboardProjectCard
                         key={project._id}
@@ -218,10 +201,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <CreateTeamDialog
-        open={createDialogOpen}
-        onOpenChange={setCreateDialogOpen}
-      />
+      <CreateTeamDialog open={createDialogOpen} onOpenChange={setCreateDialogOpen} />
     </div>
   );
 }

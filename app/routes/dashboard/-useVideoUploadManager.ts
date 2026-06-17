@@ -9,11 +9,7 @@ import {
   findUploadResumeSessionByFingerprint,
   loadUploadResumeSession,
 } from "@/lib/uploadResumeDb";
-import {
-  isProcessingRetryError,
-  isResumableUploadError,
-  uploadVideoFile,
-} from "@/lib/videoUpload";
+import { isProcessingRetryError, isResumableUploadError, uploadVideoFile } from "@/lib/videoUpload";
 
 export interface ManagedUploadItem {
   id: string;
@@ -78,10 +74,7 @@ export function useVideoUploadManager() {
         }
 
         const fingerprint = await buildFileFingerprint(file);
-        const existingResume = await findUploadResumeSessionByFingerprint(
-          fingerprint,
-          projectId,
-        );
+        const existingResume = await findUploadResumeSessionByFingerprint(fingerprint, projectId);
 
         setUploads((prev) => [
           ...prev,
@@ -108,8 +101,7 @@ export function useVideoUploadManager() {
             });
           }
 
-          let resumeSession =
-            (await loadUploadResumeSession(createdVideoId)) ?? existingResume;
+          let resumeSession = (await loadUploadResumeSession(createdVideoId)) ?? existingResume;
 
           const runUpload = async () => {
             setUploads((prev) =>
@@ -135,9 +127,7 @@ export function useVideoUploadManager() {
               fileFingerprint: fingerprint,
               onResumingChange: (resuming) => {
                 setUploads((prev) =>
-                  prev.map((upload) =>
-                    upload.id === uploadId ? { ...upload, resuming } : upload,
-                  ),
+                  prev.map((upload) => (upload.id === uploadId ? { ...upload, resuming } : upload)),
                 );
               },
               onProgress: (update) => {
@@ -191,8 +181,7 @@ export function useVideoUploadManager() {
             setUploads((prev) => prev.filter((upload) => upload.id !== uploadId));
           }, 3000);
         } catch (error) {
-          const errorMessage =
-            error instanceof Error ? error.message : "Upload failed";
+          const errorMessage = error instanceof Error ? error.message : "Upload failed";
           const cancelled = abortController.signal.aborted;
           const resumable = isResumableUploadError(error);
           const canRetryProcessing = isProcessingRetryError(error);
@@ -276,8 +265,7 @@ export function useVideoUploadManager() {
           setUploads((prev) => prev.filter((item) => item.id !== uploadId));
         }, 3000);
       } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : "Processing failed";
+        const errorMessage = error instanceof Error ? error.message : "Processing failed";
         const canRetryProcessing = isProcessingRetryError(error);
         if (!canRetryProcessing) {
           await deleteUploadResumeSession(upload.videoId);

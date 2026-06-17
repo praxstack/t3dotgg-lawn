@@ -26,9 +26,7 @@ export async function buildFileFingerprint(file: File) {
   const metadata = new TextEncoder().encode(
     `${file.name}:${file.size}:${file.lastModified}:${file.type}`,
   );
-  const samples = new Uint8Array(
-    metadata.byteLength + firstSample.size + lastSample.size,
-  );
+  const samples = new Uint8Array(metadata.byteLength + firstSample.size + lastSample.size);
   samples.set(metadata, 0);
   samples.set(new Uint8Array(await firstSample.arrayBuffer()), metadata.byteLength);
   samples.set(

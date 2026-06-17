@@ -14,23 +14,13 @@ import { useMoveActions } from "@/lib/dnd/useMoveActions";
 type MoveVideoDialogProps = {
   teamId: Id<"teams">;
   /** The video being moved, plus its current folder so we can exclude it. */
-  video:
-    | { _id: Id<"videos">; title: string; projectId: Id<"projects"> }
-    | null;
+  video: { _id: Id<"videos">; title: string; projectId: Id<"projects"> } | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 };
 
-export function MoveVideoDialog({
-  teamId,
-  video,
-  open,
-  onOpenChange,
-}: MoveVideoDialogProps) {
-  const folders = useQuery(
-    api.projects.listForMove,
-    open ? { teamId } : "skip",
-  );
+export function MoveVideoDialog({ teamId, video, open, onOpenChange }: MoveVideoDialogProps) {
+  const folders = useQuery(api.projects.listForMove, open ? { teamId } : "skip");
   const { moveVideoTo } = useMoveActions();
   const [isMoving, setIsMoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,9 +54,7 @@ export function MoveVideoDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Move {video ? `"${video.title}"` : "video"}</DialogTitle>
-          <DialogDescription>
-            Choose which folder this video should live in.
-          </DialogDescription>
+          <DialogDescription>Choose which folder this video should live in.</DialogDescription>
         </DialogHeader>
 
         {error && (
@@ -78,22 +66,20 @@ export function MoveVideoDialog({
         {folders === undefined ? (
           <p className="text-sm text-[#888]">Loading folders...</p>
         ) : (
-          <div className="max-h-80 overflow-y-auto border-2 border-[#1a1a1a] divide-y-2 divide-[#1a1a1a]">
+          <div className="max-h-80 divide-y-2 divide-[#1a1a1a] overflow-y-auto border-2 border-[#1a1a1a]">
             {destinations.map((folder) => (
               <button
                 key={folder._id}
                 type="button"
                 disabled={isMoving}
-                className="w-full px-4 py-3 text-left hover:bg-[#e8e8e0] transition-colors disabled:opacity-50"
+                className="w-full px-4 py-3 text-left transition-colors hover:bg-[#e8e8e0] disabled:opacity-50"
                 onClick={() => handleMove(folder._id)}
               >
-                <p className="font-bold text-[#1a1a1a] truncate">{folder.path}</p>
+                <p className="truncate font-bold text-[#1a1a1a]">{folder.path}</p>
               </button>
             ))}
             {destinations.length === 0 && (
-              <p className="px-4 py-3 text-sm text-[#888]">
-                No other folders to move into.
-              </p>
+              <p className="px-4 py-3 text-sm text-[#888]">No other folders to move into.</p>
             )}
           </div>
         )}

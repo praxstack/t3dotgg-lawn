@@ -1,17 +1,10 @@
-
 import { useMutation } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -61,13 +54,16 @@ export default function TeamPage() {
   // Empty background of the team grid = move a folder to the top level.
   const teamId = team?._id;
   const canCreateProjectRef = team?.role !== "viewer";
-  const { ref: gridDropRef, isDraggedOver: gridDraggedOver, canDropHere: gridCanDrop } =
-    useFolderDropTarget<HTMLDivElement>({
-      disabled: !teamId || !canCreateProjectRef,
-      targetProjectId: undefined, // top level
-      teamId: teamId as Id<"teams">,
-      onMove: (payload) => handleDropMove(payload, undefined),
-    });
+  const {
+    ref: gridDropRef,
+    isDraggedOver: gridDraggedOver,
+    canDropHere: gridCanDrop,
+  } = useFolderDropTarget<HTMLDivElement>({
+    disabled: !teamId || !canCreateProjectRef,
+    targetProjectId: undefined, // top level
+    teamId: teamId as Id<"teams">,
+    onMove: (payload) => handleDropMove(payload, undefined),
+  });
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [memberDialogOpen, setMemberDialogOpen] = useState(false);
@@ -88,15 +84,12 @@ export default function TeamPage() {
   }, [shouldCanonicalize, context, navigate]);
 
   const isLoadingData =
-    context === undefined ||
-    billing === undefined ||
-    projects === undefined ||
-    shouldCanonicalize;
+    context === undefined || billing === undefined || projects === undefined || shouldCanonicalize;
 
   // Not found state
   if (context === null) {
     return (
-      <div className="flex items-center justify-center h-full">
+      <div className="flex h-full items-center justify-center">
         <div className="text-[#888]">Team not found</div>
       </div>
     );
@@ -143,7 +136,7 @@ export default function TeamPage() {
   const billingPath = team ? teamSettingsPath(team.slug) : null;
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="flex h-full flex-col">
       {/* Header */}
       <DashboardHeader paths={[{ label: team?.slug ?? "team" }]}>
         {canAccessBilling && team && (
@@ -151,22 +144,19 @@ export default function TeamPage() {
             variant="outline"
             onClick={() => navigate({ to: billingPath ?? teamSettingsPath(team.slug) })}
           >
-            <CreditCard className="sm:mr-1.5 h-4 w-4" />
+            <CreditCard className="h-4 w-4 sm:mr-1.5" />
             <span className="hidden sm:inline">Billing</span>
           </Button>
         )}
         {canManageMembers && (
-          <Button
-            variant="outline"
-            onClick={() => setMemberDialogOpen(true)}
-          >
-            <Users className="sm:mr-1.5 h-4 w-4" />
+          <Button variant="outline" onClick={() => setMemberDialogOpen(true)}>
+            <Users className="h-4 w-4 sm:mr-1.5" />
             <span className="hidden sm:inline">Members</span>
           </Button>
         )}
         {canCreateProject && (
           <Button onClick={() => setCreateDialogOpen(true)}>
-            <Plus className="sm:mr-1.5 h-4 w-4" />
+            <Plus className="h-4 w-4 sm:mr-1.5" />
             <span className="hidden sm:inline">New project</span>
           </Button>
         )}
@@ -197,10 +187,10 @@ export default function TeamPage() {
           </Card>
         )}
         {!isLoadingData && projects.length === 0 ? (
-          <div className="h-full flex items-center justify-center animate-in fade-in duration-300">
+          <div className="animate-in fade-in flex h-full items-center justify-center duration-300">
             <Card className="max-w-sm text-center">
               <CardHeader>
-                <div className="mx-auto w-12 h-12 bg-[#e8e8e0] flex items-center justify-center mb-2">
+                <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center bg-[#e8e8e0]">
                   <Folder className="h-6 w-6 text-[#888]" />
                 </div>
                 <CardTitle className="text-lg">No projects yet</CardTitle>
@@ -212,10 +202,7 @@ export default function TeamPage() {
               </CardHeader>
               {canCreateProject && (
                 <CardContent>
-                  <Button
-                    className="w-full"
-                    onClick={() => setCreateDialogOpen(true)}
-                  >
+                  <Button className="w-full" onClick={() => setCreateDialogOpen(true)}>
                     <Plus className="mr-1.5 h-4 w-4" />
                     Create project
                   </Button>
@@ -241,10 +228,11 @@ export default function TeamPage() {
           <div
             ref={gridDropRef}
             className={cn(
-              "grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 transition-opacity duration-300",
+              "grid grid-cols-1 gap-4 transition-opacity duration-300 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4",
               isLoadingData ? "opacity-0" : "opacity-100",
-              gridDraggedOver && gridCanDrop &&
-                "outline-2 outline-dashed outline-[#2d5a2d] outline-offset-4",
+              gridDraggedOver &&
+                gridCanDrop &&
+                "outline-2 outline-offset-4 outline-[#2d5a2d] outline-dashed",
             )}
           >
             {projects?.map((project) => (
@@ -252,9 +240,7 @@ export default function TeamPage() {
                 key={project._id}
                 teamSlug={team.slug}
                 project={project}
-                onOpen={() =>
-                  navigate({ to: projectPath(team.slug, project._id) })
-                }
+                onOpen={() => navigate({ to: projectPath(team.slug, project._id) })}
                 onDelete={canCreateProject ? handleDeleteProject : undefined}
                 onMove={canCreateProject ? (p) => setMoveTarget(p) : undefined}
                 dnd={
@@ -278,7 +264,7 @@ export default function TeamPage() {
       </div>
 
       {dndError ? (
-        <div className="fixed right-4 top-16 z-50" aria-live="polite">
+        <div className="fixed top-16 right-4 z-50" aria-live="polite">
           <button
             type="button"
             onClick={() => setDndError(null)}
@@ -307,17 +293,10 @@ export default function TeamPage() {
               />
             </div>
             <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setCreateDialogOpen(false)}
-              >
+              <Button type="button" variant="outline" onClick={() => setCreateDialogOpen(false)}>
                 Cancel
               </Button>
-              <Button
-                type="submit"
-                disabled={!newProjectName.trim() || isLoading}
-              >
+              <Button type="submit" disabled={!newProjectName.trim() || isLoading}>
                 {isLoading ? "Creating..." : "Create"}
               </Button>
             </DialogFooter>

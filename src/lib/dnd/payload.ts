@@ -33,9 +33,7 @@ export function makeDragData(payload: DragPayload): Record<string, unknown> {
 }
 
 /** Narrow an unknown drop `source.data` record back to our `DragPayload`. */
-export function readDragPayload(
-  data: Record<string | symbol, unknown>,
-): DragPayload | null {
+export function readDragPayload(data: Record<string | symbol, unknown>): DragPayload | null {
   if (!data || data[DRAG_KIND_KEY] !== true) return null;
   if (data.kind === "video" || data.kind === "folder") {
     return data as unknown as DragPayload;

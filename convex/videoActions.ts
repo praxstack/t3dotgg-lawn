@@ -119,9 +119,7 @@ function normalizeBucketKey(key: string): string {
     try {
       const pathname = new URL(key).pathname.replace(/^\/+/, "");
       const bucketPrefix = `${BUCKET_NAME}/`;
-      return pathname.startsWith(bucketPrefix)
-        ? pathname.slice(bucketPrefix.length)
-        : pathname;
+      return pathname.startsWith(bucketPrefix) ? pathname.slice(bucketPrefix.length) : pathname;
     } catch {
       return key;
     }
@@ -143,9 +141,7 @@ async function buildSignedBucketObjectUrl(
   const command = new GetObjectCommand({
     Bucket: BUCKET_NAME,
     Key: normalizedKey,
-    ResponseContentDisposition: filename
-      ? `attachment; filename="${filename}"`
-      : undefined,
+    ResponseContentDisposition: filename ? `attachment; filename="${filename}"` : undefined,
     ResponseContentType: options?.contentType,
   });
   return await getSignedUrl(s3, command, { expiresIn: options?.expiresIn ?? 600 });
@@ -158,10 +154,7 @@ function getValueString(value: unknown, field: string): string | null {
 
 function normalizeContentType(contentType: string | null | undefined): string {
   if (!contentType) return "";
-  return contentType
-    .split(";")[0]
-    .trim()
-    .toLowerCase();
+  return contentType.split(";")[0].trim().toLowerCase();
 }
 
 function isAllowedUploadContentType(contentType: string): boolean {
@@ -198,10 +191,10 @@ function buildVideoObjectKey(videoId: Id<"videos">, filename: string) {
 
 function normalizePartEtag(etag: string) {
   const trimmed = etag.trim();
-  if (trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
+  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
     return trimmed;
   }
-  return `"${trimmed.replaceAll("\"", "")}"`;
+  return `"${trimmed.replaceAll('"', "")}"`;
 }
 
 function validatePartNumbersOrThrow(
@@ -213,20 +206,13 @@ function validatePartNumbersOrThrow(
     throw new Error("At least one part number is required.");
   }
   const maxBatchSize = options?.maxBatchSize;
-  if (
-    maxBatchSize !== undefined &&
-    partNumbers.length > maxBatchSize
-  ) {
+  if (maxBatchSize !== undefined && partNumbers.length > maxBatchSize) {
     throw new Error(`Cannot sign more than ${maxBatchSize} parts at once.`);
   }
 
   const seen = new Set<number>();
   for (const partNumber of partNumbers) {
-    if (
-      !Number.isInteger(partNumber) ||
-      partNumber < 1 ||
-      partNumber > partCount
-    ) {
+    if (!Number.isInteger(partNumber) || partNumber < 1 || partNumber > partCount) {
       throw new Error("Invalid multipart part number.");
     }
     if (seen.has(partNumber)) {
@@ -236,10 +222,7 @@ function validatePartNumbersOrThrow(
   }
 }
 
-async function getVideoForUpload(
-  ctx: ActionCtx,
-  videoId: Id<"videos">,
-): Promise<Doc<"videos">> {
+async function getVideoForUpload(ctx: ActionCtx, videoId: Id<"videos">): Promise<Doc<"videos">> {
   const video = await ctx.runQuery(api.videos.getVideoForPlayback, { videoId });
   if (!video) {
     throw new Error("Video not found");
@@ -286,13 +269,8 @@ function shouldDeleteUploadedObjectOnFailure(error: unknown): boolean {
   );
 }
 
-async function requireVideoMemberAccess(
-  ctx: ActionCtx,
-  videoId: Id<"videos">
-) {
-  const video = (await ctx.runQuery(api.videos.get, { videoId })) as
-    | { role?: string }
-    | null;
+async function requireVideoMemberAccess(ctx: ActionCtx, videoId: Id<"videos">) {
+  const video = (await ctx.runQuery(api.videos.get, { videoId })) as { role?: string } | null;
   if (!video || video.role === "viewer") {
     throw new Error("Requires member role or higher");
   }
@@ -308,9 +286,7 @@ async function deleteUploadedObject(key: string) {
   );
 }
 
-function buildPublicPlaybackSession(
-  playbackId: string,
-): { url: string; posterUrl: string } {
+function buildPublicPlaybackSession(playbackId: string): { url: string; posterUrl: string } {
   return {
     url: buildMuxPlaybackUrl(playbackId),
     posterUrl: buildMuxThumbnailUrl(playbackId),
@@ -359,16 +335,10 @@ async function reconcileMuxAssetStatus(
     muxAssetId: string;
   },
 ) {
-  const processingVideo = await ctx.runQuery(
-    internal.videos.getMuxProcessingState,
-    {
-      videoId: params.videoId,
-    },
-  );
-  if (
-    !processingVideo ||
-    processingVideo.muxAssetId !== params.muxAssetId
-  ) {
+  const processingVideo = await ctx.runQuery(internal.videos.getMuxProcessingState, {
+    videoId: params.videoId,
+  });
+  if (!processingVideo || processingVideo.muxAssetId !== params.muxAssetId) {
     return { status: "skipped" as const };
   }
 
@@ -381,22 +351,17 @@ async function reconcileMuxAssetStatus(
     const uploadError =
       asset.errors?.messages?.find((message) => message.length > 0) ??
       "Mux failed to process this asset.";
-    const updated = await ctx.runMutation(
-      internal.videos.markMuxAssetAsFailed,
-      {
-        videoId: params.videoId,
-        muxAssetId: params.muxAssetId,
-        uploadError,
-      },
-    );
+    const updated = await ctx.runMutation(internal.videos.markMuxAssetAsFailed, {
+      videoId: params.videoId,
+      muxAssetId: params.muxAssetId,
+      uploadError,
+    });
     return {
-      status: updated ? "errored" as const : "skipped" as const,
+      status: updated ? ("errored" as const) : ("skipped" as const),
     };
   }
 
-  let playbackId = asset.playback_ids?.find(
-    (entry) => entry.policy === "public" && entry.id,
-  )?.id;
+  let playbackId = asset.playback_ids?.find((entry) => entry.policy === "public" && entry.id)?.id;
   if (!playbackId) {
     const created = await createPublicPlaybackId(params.muxAssetId);
     playbackId = created.id;
@@ -413,7 +378,7 @@ async function reconcileMuxAssetStatus(
     thumbnailUrl: buildMuxThumbnailUrl(playbackId),
   });
   return {
-    status: updated ? "ready" as const : "skipped" as const,
+    status: updated ? ("ready" as const) : ("skipped" as const),
   };
 }
 
@@ -677,9 +642,7 @@ export const completeMultipartUpload = action({
         throw new Error("Video file is too large. Maximum size is 30 GB.");
       }
 
-      const normalizedContentType = normalizeContentType(
-        head.ContentType ?? video.contentType,
-      );
+      const normalizedContentType = normalizeContentType(head.ContentType ?? video.contentType);
       if (!isAllowedUploadContentType(normalizedContentType)) {
         throw new Error("Unsupported video format. Allowed: mp4, mov, webm, mkv.");
       }
@@ -841,9 +804,7 @@ export const markUploadComplete = action({
         throw new Error("Video file is too large. Maximum size is 30 GB.");
       }
 
-      const normalizedContentType = normalizeContentType(
-        head.ContentType ?? video.contentType,
-      );
+      const normalizedContentType = normalizeContentType(head.ContentType ?? video.contentType);
       if (!isAllowedUploadContentType(normalizedContentType)) {
         throw new Error("Unsupported video format. Allowed: mp4, mov, webm, mkv.");
       }
@@ -889,9 +850,7 @@ export const markUploadComplete = action({
       if (shouldDeleteObject) {
         throw error;
       }
-      throw new Error(
-        "Mux ingest failed after upload. Retry processing without re-uploading.",
-      );
+      throw new Error("Mux ingest failed after upload. Retry processing without re-uploading.");
     }
 
     return { success: true };
@@ -937,13 +896,10 @@ export const sweepStaleUploads = internalAction({
   }),
   handler: async (ctx) => {
     const cutoff = Date.now() - STALE_UPLOAD_THRESHOLD_MS;
-    const candidates = await ctx.runQuery(
-      internal.videos.listStaleUploadCandidates,
-      {
-        cutoff,
-        limit: STALE_UPLOAD_SWEEP_BATCH_SIZE,
-      },
-    );
+    const candidates = await ctx.runQuery(internal.videos.listStaleUploadCandidates, {
+      cutoff,
+      limit: STALE_UPLOAD_SWEEP_BATCH_SIZE,
+    });
     let reclaimed = 0;
 
     for (const candidate of candidates) {
@@ -1023,11 +979,7 @@ export const checkMuxAssetStatus = action({
     const video = await ctx.runQuery(api.videos.getVideoForPlayback, {
       videoId: args.videoId,
     });
-    if (
-      !video ||
-      video.status !== "processing" ||
-      !video.muxAssetId
-    ) {
+    if (!video || video.status !== "processing" || !video.muxAssetId) {
       return { status: "skipped" as const };
     }
 
@@ -1056,12 +1008,9 @@ export const sweepMuxAssetStatuses = internalAction({
     }
 
     try {
-      const candidates = await ctx.runMutation(
-        internal.videos.claimMuxProcessingCandidates,
-        {
-          limit: MUX_STATUS_SWEEP_BATCH_SIZE,
-        },
-      );
+      const candidates = await ctx.runMutation(internal.videos.claimMuxProcessingCandidates, {
+        limit: MUX_STATUS_SWEEP_BATCH_SIZE,
+      });
       let checked = 0;
       let reconciled = 0;
 
@@ -1097,10 +1046,7 @@ export const getPlaybackSession = action({
     url: v.string(),
     posterUrl: v.string(),
   }),
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{ url: string; posterUrl: string }> => {
+  handler: async (ctx, args): Promise<{ url: string; posterUrl: string }> => {
     const video = await ctx.runQuery(api.videos.getVideoForPlayback, {
       videoId: args.videoId,
     });
@@ -1174,10 +1120,7 @@ export const getPublicPlaybackSession = action({
     url: v.string(),
     posterUrl: v.string(),
   }),
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{ url: string; posterUrl: string }> => {
+  handler: async (ctx, args): Promise<{ url: string; posterUrl: string }> => {
     const result = await ctx.runQuery(api.videos.getByPublicId, {
       publicId: args.publicId,
     });
@@ -1201,10 +1144,7 @@ export const getSharedPlaybackSession = action({
     url: v.string(),
     posterUrl: v.string(),
   }),
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{ url: string; posterUrl: string }> => {
+  handler: async (ctx, args): Promise<{ url: string; posterUrl: string }> => {
     const result = await ctx.runQuery(api.videos.getByShareGrant, {
       grantToken: args.grantToken,
     });

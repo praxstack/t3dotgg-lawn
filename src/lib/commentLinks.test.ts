@@ -7,8 +7,7 @@ function reconstructComment(parts: ReturnType<typeof parseCommentLinks>) {
 }
 
 test("links http and https URLs while preserving surrounding whitespace", () => {
-  const text =
-    "First: http://example.com/path\n\nSecond:\thttps://example.org?q=one#two";
+  const text = "First: http://example.com/path\n\nSecond:\thttps://example.org?q=one#two";
   const parts = parseCommentLinks(text);
 
   assert.deepEqual(
@@ -30,8 +29,7 @@ test("links http and https URLs while preserving surrounding whitespace", () => 
 });
 
 test("leaves sentence punctuation and unmatched delimiters outside links", () => {
-  const text =
-    'See (https://example.com/docs), then "https://example.org/test".';
+  const text = 'See (https://example.com/docs), then "https://example.org/test".';
   const parts = parseCommentLinks(text);
 
   assert.deepEqual(

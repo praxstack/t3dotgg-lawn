@@ -13,28 +13,24 @@ type MoveOutcome = { ok: boolean; error?: string };
  * state back automatically if the server rejects the move.
  */
 export function useMoveActions() {
-  const moveVideo = useMutation(api.videos.move).withOptimisticUpdate(
-    (localStore, { videoId }) => {
-      // Remove the moved video from whichever cached `videos.list` contains it
-      // (its source folder), so the card vanishes from the current view instantly.
-      for (const { args, value } of localStore.getAllQueries(api.videos.list)) {
-        if (!value) continue;
-        if (!value.some((video) => video._id === videoId)) continue;
-        localStore.setQuery(
-          api.videos.list,
-          args,
-          value.filter((video) => video._id !== videoId),
-        );
-      }
-    },
-  );
+  const moveVideo = useMutation(api.videos.move).withOptimisticUpdate((localStore, { videoId }) => {
+    // Remove the moved video from whichever cached `videos.list` contains it
+    // (its source folder), so the card vanishes from the current view instantly.
+    for (const { args, value } of localStore.getAllQueries(api.videos.list)) {
+      if (!value) continue;
+      if (!value.some((video) => video._id === videoId)) continue;
+      localStore.setQuery(
+        api.videos.list,
+        args,
+        value.filter((video) => video._id !== videoId),
+      );
+    }
+  });
 
   const moveFolder = useMutation(api.projects.move).withOptimisticUpdate(
     (localStore, { projectId }) => {
       // Remove the moved folder from the source listing (folder view or team root).
-      for (const { args, value } of localStore.getAllQueries(
-        api.projects.listChildren,
-      )) {
+      for (const { args, value } of localStore.getAllQueries(api.projects.listChildren)) {
         if (!value) continue;
         if (!value.some((folder) => folder._id === projectId)) continue;
         localStore.setQuery(
@@ -56,10 +52,7 @@ export function useMoveActions() {
   );
 
   const moveVideoTo = useCallback(
-    async (
-      videoId: Id<"videos">,
-      destProjectId: Id<"projects">,
-    ): Promise<MoveOutcome> => {
+    async (videoId: Id<"videos">, destProjectId: Id<"projects">): Promise<MoveOutcome> => {
       try {
         await moveVideo({ videoId, projectId: destProjectId });
         return { ok: true };
@@ -74,10 +67,7 @@ export function useMoveActions() {
   );
 
   const moveFolderTo = useCallback(
-    async (
-      folderId: Id<"projects">,
-      destParentId?: Id<"projects">,
-    ): Promise<MoveOutcome> => {
+    async (folderId: Id<"projects">, destParentId?: Id<"projects">): Promise<MoveOutcome> => {
       try {
         await moveFolder({ projectId: folderId, newParentId: destParentId });
         return { ok: true };

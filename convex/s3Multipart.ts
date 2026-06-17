@@ -22,10 +22,7 @@ export type UploadedPartInfo = {
   etag: string;
 };
 
-export async function createMultipartUploadSession(args: {
-  key: string;
-  contentType: string;
-}) {
+export async function createMultipartUploadSession(args: { key: string; contentType: string }) {
   const s3 = getS3Client();
   const result = await s3.send(
     new CreateMultipartUploadCommand({
@@ -132,10 +129,7 @@ export async function completeMultipartUploadSession(args: {
   );
 }
 
-export async function abortMultipartUploadSession(args: {
-  key: string;
-  uploadId: string;
-}) {
+export async function abortMultipartUploadSession(args: { key: string; uploadId: string }) {
   const s3 = getS3Client();
   try {
     await s3.send(
@@ -154,10 +148,7 @@ export async function abortMultipartUploadSession(args: {
   }
 }
 
-export async function listMultipartUploadsInitiatedBefore(args: {
-  cutoff: number;
-  limit: number;
-}) {
+export async function listMultipartUploadsInitiatedBefore(args: { cutoff: number; limit: number }) {
   const s3 = getS3Client();
   const uploads: Array<{ key: string; uploadId: string }> = [];
   let keyMarker: string | undefined;

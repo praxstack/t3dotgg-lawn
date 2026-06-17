@@ -1,4 +1,3 @@
-
 import { useMutation } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
@@ -40,7 +39,7 @@ export default function InvitePage() {
 
   if (invite === undefined || !isLoaded) {
     return (
-      <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center bg-[#f0f0e8]">
         <div className="text-[#888]">Loading...</div>
       </div>
     );
@@ -48,10 +47,10 @@ export default function InvitePage() {
 
   if (invite === null) {
     return (
-      <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
-        <Card className="max-w-md w-full">
+      <div className="flex min-h-screen items-center justify-center bg-[#f0f0e8] p-4">
+        <Card className="w-full max-w-md">
           <CardHeader className="text-center">
-            <div className="mx-auto w-12 h-12 bg-[#dc2626]/10 flex items-center justify-center mb-4 border-2 border-[#dc2626]">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center border-2 border-[#dc2626] bg-[#dc2626]/10">
               <AlertCircle className="h-6 w-6 text-[#dc2626]" />
             </div>
             <CardTitle>Invalid or expired invite</CardTitle>
@@ -74,10 +73,10 @@ export default function InvitePage() {
   // User not signed in
   if (!user) {
     return (
-      <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
-        <Card className="max-w-md w-full">
+      <div className="flex min-h-screen items-center justify-center bg-[#f0f0e8] p-4">
+        <Card className="w-full max-w-md">
           <CardHeader className="text-center">
-            <div className="mx-auto w-12 h-12 bg-[#e8e8e0] flex items-center justify-center mb-4 border-2 border-[#1a1a1a]">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center border-2 border-[#1a1a1a] bg-[#e8e8e0]">
               <Users className="h-6 w-6 text-[#888]" />
             </div>
             <CardTitle>You&apos;re invited to {invite.team?.name}</CardTitle>
@@ -86,17 +85,20 @@ export default function InvitePage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="p-3 bg-[#e8e8e0] border-2 border-[#1a1a1a] flex items-center gap-3">
+            <div className="flex items-center gap-3 border-2 border-[#1a1a1a] bg-[#e8e8e0] p-3">
               <Mail className="h-5 w-5 text-[#888]" />
               <div>
                 <p className="text-sm text-[#888]">Invited email</p>
                 <p className="font-bold text-[#1a1a1a]">{invite.email}</p>
               </div>
             </div>
-            <p className="text-sm text-[#888] text-center">
+            <p className="text-center text-sm text-[#888]">
               Sign in with the email address above to accept this invite.
             </p>
-            <a href={`/sign-in?redirect_url=${encodeURIComponent(`/invite/${token}`)}`} className="block">
+            <a
+              href={`/sign-in?redirect_url=${encodeURIComponent(`/invite/${token}`)}`}
+              className="block"
+            >
               <Button className="w-full">Sign in to accept</Button>
             </a>
           </CardContent>
@@ -108,10 +110,10 @@ export default function InvitePage() {
   // User signed in but with different email
   if (user.primaryEmailAddress?.emailAddress !== invite.email) {
     return (
-      <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
-        <Card className="max-w-md w-full">
+      <div className="flex min-h-screen items-center justify-center bg-[#f0f0e8] p-4">
+        <Card className="w-full max-w-md">
           <CardHeader className="text-center">
-            <div className="mx-auto w-12 h-12 bg-[#ca8a04]/10 flex items-center justify-center mb-4 border-2 border-[#ca8a04]">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center border-2 border-[#ca8a04] bg-[#ca8a04]/10">
               <AlertCircle className="h-6 w-6 text-[#ca8a04]" />
             </div>
             <CardTitle>Different email address</CardTitle>
@@ -121,10 +123,13 @@ export default function InvitePage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <p className="text-sm text-[#888] text-center">
+            <p className="text-center text-sm text-[#888]">
               Please sign in with the correct email address to accept this invite.
             </p>
-            <a href={`/sign-in?redirect_url=${encodeURIComponent(`/invite/${token}`)}`} className="block">
+            <a
+              href={`/sign-in?redirect_url=${encodeURIComponent(`/invite/${token}`)}`}
+              className="block"
+            >
               <Button className="w-full" variant="outline">
                 Sign in with different account
               </Button>
@@ -137,10 +142,10 @@ export default function InvitePage() {
 
   // User signed in with correct email
   return (
-    <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
-      <Card className="max-w-md w-full">
+    <div className="flex min-h-screen items-center justify-center bg-[#f0f0e8] p-4">
+      <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <div className="mx-auto w-12 h-12 bg-[#e8e8e0] flex items-center justify-center mb-4 border-2 border-[#1a1a1a]">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center border-2 border-[#1a1a1a] bg-[#e8e8e0]">
             <Users className="h-6 w-6 text-[#888]" />
           </div>
           <CardTitle>Join {invite.team?.name}</CardTitle>
@@ -151,15 +156,11 @@ export default function InvitePage() {
         </CardHeader>
         <CardContent className="space-y-4">
           {error && (
-            <div className="p-3 bg-[#dc2626]/10 text-[#dc2626] border-2 border-[#dc2626] text-sm">
+            <div className="border-2 border-[#dc2626] bg-[#dc2626]/10 p-3 text-sm text-[#dc2626]">
               {error}
             </div>
           )}
-          <Button
-            className="w-full"
-            onClick={handleAccept}
-            disabled={isAccepting}
-          >
+          <Button className="w-full" onClick={handleAccept} disabled={isAccepting}>
             {isAccepting ? (
               "Joining..."
             ) : (

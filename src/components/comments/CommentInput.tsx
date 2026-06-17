@@ -36,8 +36,8 @@ export function CommentInput({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const createComment = useMutation(api.comments.create);
 
-  const defaultPlaceholder = showTimestamp 
-    ? `Comment at ${formatTimestamp(timestampSeconds)}...` 
+  const defaultPlaceholder = showTimestamp
+    ? `Comment at ${formatTimestamp(timestampSeconds)}...`
     : "Add a comment...";
   const finalPlaceholder = placeholder || defaultPlaceholder;
 
@@ -74,13 +74,7 @@ export function CommentInput({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (
-      e.key === "Enter" &&
-      !e.shiftKey &&
-      !e.metaKey &&
-      !e.ctrlKey &&
-      !e.altKey
-    ) {
+    if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
       e.preventDefault();
       void submitComment();
     }
@@ -90,12 +84,10 @@ export function CommentInput({
   };
 
   return (
-    <form 
-      onSubmit={handleSubmit} 
+    <form
+      onSubmit={handleSubmit}
       className={
-        variant === "seamless" 
-          ? "relative w-full bg-[#f0f0e8]"
-          : "relative w-full pb-1 pr-1"
+        variant === "seamless" ? "relative w-full bg-[#f0f0e8]" : "relative w-full pr-1 pb-1"
       }
     >
       <textarea
@@ -107,16 +99,16 @@ export function CommentInput({
         autoFocus={autoFocus}
         className={
           variant === "seamless"
-            ? "block w-full max-h-64 min-h-[100px] bg-transparent border-0 focus:ring-0 resize-none px-4 pt-4 pb-12 text-sm leading-relaxed text-[#1a1a1a] placeholder:text-[#888] font-sans outline-none transition-all"
-            : "block w-full max-h-64 min-h-[100px] bg-[#f0f0e8] border-2 border-[#1a1a1a] focus:ring-0 resize-none px-3 pt-3 pb-12 text-sm leading-relaxed text-[#1a1a1a] placeholder:text-[#888] font-sans outline-none shadow-[4px_4px_0px_0px_var(--shadow-color)] focus:translate-y-[2px] focus:translate-x-[2px] focus:shadow-[2px_2px_0px_0px_var(--shadow-color)] transition-all"
+            ? "block max-h-64 min-h-[100px] w-full resize-none border-0 bg-transparent px-4 pt-4 pb-12 font-sans text-sm leading-relaxed text-[#1a1a1a] transition-all outline-none placeholder:text-[#888] focus:ring-0"
+            : "block max-h-64 min-h-[100px] w-full resize-none border-2 border-[#1a1a1a] bg-[#f0f0e8] px-3 pt-3 pb-12 font-sans text-sm leading-relaxed text-[#1a1a1a] shadow-[4px_4px_0px_0px_var(--shadow-color)] transition-all outline-none placeholder:text-[#888] focus:translate-x-[2px] focus:translate-y-[2px] focus:shadow-[2px_2px_0px_0px_var(--shadow-color)] focus:ring-0"
         }
         rows={3}
       />
-      <div 
+      <div
         className={
-          variant === "seamless" 
-            ? "absolute bottom-3 right-3 flex items-center gap-2" 
-            : "absolute bottom-3 right-3 flex items-center gap-2"
+          variant === "seamless"
+            ? "absolute right-3 bottom-3 flex items-center gap-2"
+            : "absolute right-3 bottom-3 flex items-center gap-2"
         }
       >
         {onCancel && (

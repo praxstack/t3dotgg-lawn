@@ -41,9 +41,7 @@ function getSubscriptionSyncData(
 ) {
   const item = subscription.items.data[0];
   const stripeCustomerId =
-    typeof subscription.customer === "string"
-      ? subscription.customer
-      : subscription.customer.id;
+    typeof subscription.customer === "string" ? subscription.customer : subscription.customer.id;
 
   if (!item && !fallback) {
     throw new Error("Subscription has no items.");
@@ -124,8 +122,7 @@ export const createSubscriptionCheckout = action({
 
     const stripePriceId = getStripePriceIdForPlan(args.plan);
 
-    const shouldStartTrial =
-      !existingSubscription && !team.stripeSubscriptionId;
+    const shouldStartTrial = !existingSubscription && !team.stripeSubscriptionId;
 
     const sessionParams: Stripe.Checkout.SessionCreateParams = {
       mode: "subscription",
@@ -189,16 +186,10 @@ export const reconcileTeamSubscription = action({
     const teamSubscriptions = subscriptions.data.filter(
       (subscription) => subscription.metadata.orgId === team._id,
     );
-    const newestFirst = [...teamSubscriptions].sort(
-      (a, b) => b.created - a.created,
-    );
+    const newestFirst = [...teamSubscriptions].sort((a, b) => b.created - a.created);
     const subscription =
-      newestFirst.find(
-        (candidate) => candidate.id === team.stripeSubscriptionId,
-      ) ??
-      newestFirst.find((candidate) =>
-        hasActiveTeamSubscriptionStatus(candidate.status),
-      ) ??
+      newestFirst.find((candidate) => candidate.id === team.stripeSubscriptionId) ??
+      newestFirst.find((candidate) => hasActiveTeamSubscriptionStatus(candidate.status)) ??
       newestFirst[0];
 
     if (!subscription) {
@@ -206,10 +197,9 @@ export const reconcileTeamSubscription = action({
     }
 
     const syncData = getSubscriptionSyncData(subscription);
-    const existingSubscription = await ctx.runQuery(
-      components.stripe.public.getSubscription,
-      { stripeSubscriptionId: subscription.id },
-    );
+    const existingSubscription = await ctx.runQuery(components.stripe.public.getSubscription, {
+      stripeSubscriptionId: subscription.id,
+    });
 
     if (existingSubscription) {
       await ctx.runMutation(components.stripe.private.handleSubscriptionUpdated, {
@@ -262,8 +252,7 @@ export const createCustomerPortalSession = action({
       { orgId: args.teamId },
     );
 
-    const stripeCustomerId =
-      team.stripeCustomerId ?? existingSubscription?.stripeCustomerId;
+    const stripeCustomerId = team.stripeCustomerId ?? existingSubscription?.stripeCustomerId;
 
     if (!stripeCustomerId) {
       throw new Error("No Stripe customer found for this team yet.");
@@ -285,10 +274,7 @@ export const updateTeamSubscriptionPlan = action({
     plan: teamPlanValidator,
     subscriptionStatus: v.string(),
   }),
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{ plan: TeamPlan; subscriptionStatus: string }> => {
+  handler: async (ctx, args): Promise<{ plan: TeamPlan; subscriptionStatus: string }> => {
     const team = await ctx.runQuery(api.teams.get, { teamId: args.teamId });
 
     if (!team) {
@@ -337,25 +323,22 @@ export const updateTeamSubscriptionPlan = action({
       throw new Error("Use the billing portal to downgrade this subscription.");
     }
 
-    const updatedSubscription = await stripe.subscriptions.update(
-      stripeSubscriptionId,
-      {
-        items: [
-          {
-            id: currentItem.id,
-            price: stripePriceId,
-            quantity: currentItem.quantity ?? 1,
-          },
-        ],
-        metadata: {
-          ...subscription.metadata,
-          orgId: team._id,
-          plan: args.plan,
-          teamSlug: team.slug,
+    const updatedSubscription = await stripe.subscriptions.update(stripeSubscriptionId, {
+      items: [
+        {
+          id: currentItem.id,
+          price: stripePriceId,
+          quantity: currentItem.quantity ?? 1,
         },
-        proration_behavior: "create_prorations",
+      ],
+      metadata: {
+        ...subscription.metadata,
+        orgId: team._id,
+        plan: args.plan,
+        teamSlug: team.slug,
       },
-    );
+      proration_behavior: "create_prorations",
+    });
 
     const syncData = getSubscriptionSyncData(updatedSubscription, {
       currentPeriodEnd: 0,
@@ -418,16 +401,11 @@ export const getTeamBilling = query({
       storageLimitBytes: TEAM_PLAN_STORAGE_LIMIT_BYTES[subscriptionState.plan],
       storageUsedBytes,
       hasActiveSubscription: subscriptionState.hasActiveSubscription,
-      subscriptionStatus:
-        subscription?.status ?? subscriptionState.team.billingStatus ?? null,
+      subscriptionStatus: subscription?.status ?? subscriptionState.team.billingStatus ?? null,
       stripeCustomerId:
-        subscriptionState.team.stripeCustomerId ??
-        subscription?.stripeCustomerId ??
-        null,
+        subscriptionState.team.stripeCustomerId ?? subscription?.stripeCustomerId ?? null,
       stripeSubscriptionId:
-        subscription?.stripeSubscriptionId ??
-        subscriptionState.team.stripeSubscriptionId ??
-        null,
+        subscription?.stripeSubscriptionId ?? subscriptionState.team.stripeSubscriptionId ?? null,
       stripePriceId: subscription?.priceId ?? subscriptionState.team.stripePriceId ?? null,
       currentPeriodEnd: subscription?.currentPeriodEnd ?? null,
       role: membership.role,
@@ -446,9 +424,7 @@ export const syncTeamSubscriptionFromWebhook = internalMutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const normalizedOrgId = args.orgId
-      ? ctx.db.normalizeId("teams", args.orgId)
-      : null;
+    const normalizedOrgId = args.orgId ? ctx.db.normalizeId("teams", args.orgId) : null;
 
     let team = normalizedOrgId ? await ctx.db.get(normalizedOrgId) : null;
 
@@ -464,9 +440,7 @@ export const syncTeamSubscriptionFromWebhook = internalMutation({
     if (!team && args.stripeCustomerId) {
       team = await ctx.db
         .query("teams")
-        .withIndex("by_stripe_customer_id", (q) =>
-          q.eq("stripeCustomerId", args.stripeCustomerId),
-        )
+        .withIndex("by_stripe_customer_id", (q) => q.eq("stripeCustomerId", args.stripeCustomerId))
         .unique();
     }
 
