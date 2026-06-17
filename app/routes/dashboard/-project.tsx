@@ -259,14 +259,13 @@ export default function ProjectPage({
 
     setIsCreatingFolder(true);
     try {
-      const newId = await createFolder({
+      await createFolder({
         teamId,
         name: newFolderName.trim(),
         parentId: resolvedProjectId,
       });
       setCreateFolderOpen(false);
       setNewFolderName("");
-      navigate({ to: projectPath(resolvedTeamSlug, newId) });
     } catch (error) {
       console.error("Failed to create folder:", error);
       window.alert(error instanceof Error ? error.message : "Failed to create folder");
