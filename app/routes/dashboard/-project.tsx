@@ -398,6 +398,17 @@ export default function ProjectPage({
           label: resolvedTeamSlug,
           href: teamHomePath(resolvedTeamSlug),
           prewarmIntentHandlers: prewarmTeamIntentHandlers,
+          // Drop a folder here to move it to the top level (videos can't go
+          // to top level — canDrop rejects them).
+          drop: teamId
+            ? {
+                teamId,
+                targetProjectId: undefined,
+                folders,
+                disabled: !canUpload,
+                onDropMove: (payload) => handleDropMove(payload, undefined),
+              }
+            : undefined,
         },
         ...breadcrumbSegments.map((segment, index) =>
           index === breadcrumbSegments.length - 1
@@ -405,6 +416,18 @@ export default function ProjectPage({
             : {
                 label: segment.name,
                 href: projectPath(resolvedTeamSlug, segment._id),
+                // Drop an item onto an ancestor crumb to move it "up" into
+                // that folder.
+                drop: teamId
+                  ? {
+                      teamId,
+                      targetProjectId: segment._id,
+                      folders,
+                      disabled: !canUpload,
+                      onDropMove: (payload: DragPayload) =>
+                        handleDropMove(payload, segment._id),
+                    }
+                  : undefined,
               },
         ),
       ]}>
@@ -539,6 +562,7 @@ export default function ProjectPage({
                         <img
                           src={thumbnailSrc}
                           alt={video.title}
+                          draggable={false}
                           className="object-cover w-full h-full"
                         />
                       ) : (
@@ -706,6 +730,7 @@ export default function ProjectPage({
                       <img
                         src={thumbnailSrc}
                         alt={video.title}
+                        draggable={false}
                         className="object-cover w-full h-full"
                       />
                     ) : (
