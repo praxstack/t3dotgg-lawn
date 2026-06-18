@@ -74,8 +74,16 @@ if [ -z "${issuer_domain:-}" ]; then
   pk=$(grep -hE '^VITE_CLERK_PUBLISHABLE_KEY=' .env.local 2>/dev/null | head -1 | cut -d= -f2- | tr -d "\"'")
   if [ -n "${pk:-}" ]; then
     host=$(printf '%s' "$pk" | sed -E 's/^pk_(test|live)_//' | { base64 -d 2>/dev/null || base64 -D 2>/dev/null; } | tr -d '$')
-    [ -n "$host" ] && echo "CLERK_JWT_ISSUER_DOMAIN=https://$host" >> "$seed"
+    if [ -n "$host" ]; then
+      issuer_domain="https://$host"
+      echo "CLERK_JWT_ISSUER_DOMAIN=$issuer_domain" >> "$seed"
+    fi
   fi
+fi
+
+if [ -z "${issuer_domain:-}" ]; then
+  echo "convex-local-setup: ERROR - missing CLERK_JWT_ISSUER_DOMAIN. Set it explicitly or provide a valid VITE_CLERK_PUBLISHABLE_KEY in .env.local." >&2
+  exit 1
 fi
 
 if [ -s "$seed" ]; then
