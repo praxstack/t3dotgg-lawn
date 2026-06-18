@@ -9,29 +9,26 @@ function HomeNavActions({ scrolled }: { scrolled: boolean }) {
   const startPath = userId ? dashboardHomePath() : "/sign-up";
   const startClassName = `px-4 py-2 border-2 transition-colors ${scrolled ? "border-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-[#f0f0e8]" : "border-[#f0f0e8] hover:bg-[#f0f0e8] hover:text-[#1a1a1a]"}`;
 
+  // Always reserve the "Log in" footprint (real link when logged out, invisible
+  // placeholder when logged in) so the nav width is constant and Pricing/Compare
+  // never shift when auth resolves. Fade the whole group in once it loads to
+  // avoid the buttons popping in.
   return (
-    <div className="flex items-center gap-6">
-      {!isLoaded ? (
-        // Reserve space during the auth-loading flash so logged-out visitors don't see a shift.
-        <span aria-hidden="true" className="invisible">
+    <div
+      className={`flex items-center gap-6 transition-opacity duration-200 ${isLoaded ? "opacity-100" : "opacity-0"}`}
+    >
+      {!isLoaded || !userId ? (
+        <Link to="/sign-in" className="underline-offset-4 hover:underline">
           Log in
-        </span>
-      ) : (
-        !userId && (
-          <Link to="/sign-in" className="underline-offset-4 hover:underline">
-            Log in
-          </Link>
-        )
-      )}
-      {isLoaded ? (
-        <Link to={startPath} className={startClassName}>
-          Start
         </Link>
       ) : (
-        <span aria-hidden="true" className={`${startClassName} invisible`}>
-          Start
+        <span aria-hidden="true" className="invisible underline-offset-4">
+          Log in
         </span>
       )}
+      <Link to={startPath} className={startClassName}>
+        Start
+      </Link>
     </div>
   );
 }
