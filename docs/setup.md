@@ -36,18 +36,13 @@ bun run lint
 
 ## Environment variables
 
-- `VITE_CONVEX_URL`
-- `VITE_CONVEX_SITE_URL`
-- `VITE_CLERK_PUBLISHABLE_KEY`
-- `CLERK_SECRET_KEY`
-- `MUX_TOKEN_ID`
-- `MUX_TOKEN_SECRET`
-- `MUX_WEBHOOK_SECRET`
-- `STRIPE_SECRET_KEY`
-- `STRIPE_WEBHOOK_SECRET`
-- `STRIPE_PRICE_BASIC_MONTHLY`
-- `STRIPE_PRICE_PRO_MONTHLY`
-- Convex deployment vars as needed (`CONVEX_DEPLOYMENT`, etc.)
+Copy `.env.example` to `.env.local` and fill it in — it lists every variable,
+grouped by section (convex, clerk, stripe, mux, storage, autumn, chunkify).
+
+- Root `.env.example` — local dev env (client `VITE_*` vars + secrets that
+  `bun run dev` seeds into the local Convex deployment).
+- `convex/.env.example` — the Convex **deployment** env vars to set in the
+  dashboard or via `npx convex env set` for cloud/prod.
 
 Stripe webhook endpoint (for the Convex Stripe component):
 

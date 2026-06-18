@@ -7,21 +7,21 @@ import { dashboardHomePath } from "@/lib/routes";
 function HomeNavActions({ scrolled }: { scrolled: boolean }) {
   const { isLoaded, userId } = useAuth();
   const startPath = userId ? dashboardHomePath() : "/sign-up";
-  const loginPlaceholder = (
-    <span aria-hidden="true" className="invisible">
-      Log in
-    </span>
-  );
   const startClassName = `px-4 py-2 border-2 transition-colors ${scrolled ? "border-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-[#f0f0e8]" : "border-[#f0f0e8] hover:bg-[#f0f0e8] hover:text-[#1a1a1a]"}`;
 
   return (
-    <div className="grid grid-cols-[auto_auto] items-center gap-6">
-      {isLoaded && !userId ? (
-        <Link to="/sign-in" className="underline-offset-4 hover:underline">
+    <div className="flex items-center gap-6">
+      {!isLoaded ? (
+        // Reserve space during the auth-loading flash so logged-out visitors don't see a shift.
+        <span aria-hidden="true" className="invisible">
           Log in
-        </Link>
+        </span>
       ) : (
-        loginPlaceholder
+        !userId && (
+          <Link to="/sign-in" className="underline-offset-4 hover:underline">
+            Log in
+          </Link>
+        )
       )}
       {isLoaded ? (
         <Link to={startPath} className={startClassName}>
