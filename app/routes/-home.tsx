@@ -9,22 +9,15 @@ function HomeNavActions({ scrolled }: { scrolled: boolean }) {
   const startPath = userId ? dashboardHomePath() : "/sign-up";
   const startClassName = `px-4 py-2 border-2 transition-colors ${scrolled ? "border-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-[#f0f0e8]" : "border-[#f0f0e8] hover:bg-[#f0f0e8] hover:text-[#1a1a1a]"}`;
 
-  // Always reserve the "Log in" footprint (real link when logged out, invisible
-  // placeholder when logged in) so the nav width is constant and Pricing/Compare
-  // never shift when auth resolves. Fade the whole group in once it loads to
-  // avoid the buttons popping in.
+  // "Start" renders immediately so it never pops or shifts. "Log in" only shows
+  // once auth resolves to a signed-out visitor — no reserved gap for signed-in
+  // users.
   return (
-    <div
-      className={`flex items-center gap-6 transition-opacity duration-200 ${isLoaded ? "opacity-100" : "opacity-0"}`}
-    >
-      {!isLoaded || !userId ? (
+    <div className="flex items-center gap-6">
+      {isLoaded && !userId && (
         <Link to="/sign-in" className="underline-offset-4 hover:underline">
           Log in
         </Link>
-      ) : (
-        <span aria-hidden="true" className="invisible underline-offset-4">
-          Log in
-        </span>
       )}
       <Link to={startPath} className={startClassName}>
         Start
@@ -72,7 +65,7 @@ export default function Homepage() {
     >
       {/* Minimal nav */}
       <nav
-        className={`fixed top-0 z-50 flex w-full items-center justify-between border-b-2 px-6 py-4 transition-all duration-200 ${scrolled ? "border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a]" : "border-transparent bg-transparent text-[#f0f0e8] drop-shadow-md"}`}
+        className={`fixed top-0 z-50 flex w-full items-center justify-between px-6 py-4 transition-all duration-200 ${scrolled ? "border-b-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a]" : "bg-transparent text-[#f0f0e8] drop-shadow-md"}`}
       >
         <div className="flex items-center gap-4">
           <span
