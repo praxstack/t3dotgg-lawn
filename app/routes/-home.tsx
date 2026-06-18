@@ -75,7 +75,7 @@ export default function Homepage() {
     >
       {/* Minimal nav */}
       <nav
-        className={`fixed top-0 z-50 flex w-full items-center justify-between border-b-2 px-6 py-4 transition-all duration-200 ${scrolled ? "border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a]" : "border-[#1a1a1a]/0 bg-transparent text-[#f0f0e8] drop-shadow-md"}`}
+        className={`fixed top-0 z-50 flex w-full items-center justify-between border-b-2 px-6 py-4 transition-all duration-200 ${scrolled ? "border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a]" : "border-transparent bg-transparent text-[#f0f0e8] drop-shadow-md"}`}
       >
         <div className="flex items-center gap-4">
           <span
