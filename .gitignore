@@ -34,6 +34,10 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+
+# per-worktree local Convex deployment (database, file storage, admin key, ports)
+/.convex
 
 # vercel
 .vercel
