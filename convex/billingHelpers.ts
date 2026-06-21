@@ -60,12 +60,14 @@ export async function getTeamSubscriptionByOrgId(ctx: BillingCtx, teamId: Id<"te
 }
 
 export async function getTeamSubscriptionState(ctx: BillingCtx, teamId: Id<"teams">) {
-  const team = await ctx.db.get(teamId);
+  const [team, subscription] = await Promise.all([
+    ctx.db.get(teamId),
+    getTeamSubscriptionByOrgId(ctx, teamId),
+  ]);
   if (!team) {
     throw new Error("Team not found");
   }
 
-  const subscription = await getTeamSubscriptionByOrgId(ctx, teamId);
   const subscriptionPlan = resolvePlanFromStripePriceId(subscription?.priceId);
   const plan = subscriptionPlan ?? normalizeStoredTeamPlan(team.plan);
   const hasActiveSubscription = hasActiveTeamSubscriptionStatus(subscription?.status);
@@ -114,8 +116,10 @@ export async function assertTeamCanStoreBytes(
   teamId: Id<"teams">,
   incomingBytes: number,
 ) {
-  const state = await assertTeamHasActiveSubscription(ctx, teamId);
-  const storageUsedBytes = await getTeamStorageUsedBytes(ctx, teamId);
+  const [state, storageUsedBytes] = await Promise.all([
+    assertTeamHasActiveSubscription(ctx, teamId),
+    getTeamStorageUsedBytes(ctx, teamId),
+  ]);
   const storageLimitBytes = TEAM_PLAN_STORAGE_LIMIT_BYTES[state.plan];
   const requestedBytes = Number.isFinite(incomingBytes) ? Math.max(0, incomingBytes) : 0;
 

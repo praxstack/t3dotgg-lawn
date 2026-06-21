@@ -19,7 +19,13 @@ export function buildPublicUrl(key: string): string {
   return url.toString();
 }
 
+let _s3Client: S3Client | null = null;
+
 export function getS3Client(): S3Client {
+  if (_s3Client) {
+    return _s3Client;
+  }
+
   const accessKeyId = process.env.RAILWAY_ACCESS_KEY_ID;
   const secretAccessKey = process.env.RAILWAY_SECRET_ACCESS_KEY;
 
@@ -27,7 +33,7 @@ export function getS3Client(): S3Client {
     throw new Error("Missing Railway S3 credentials");
   }
 
-  return new S3Client({
+  _s3Client = new S3Client({
     region: process.env.RAILWAY_REGION || "us-east-1",
     endpoint: process.env.RAILWAY_ENDPOINT,
     credentials: {
@@ -36,4 +42,5 @@ export function getS3Client(): S3Client {
     },
     forcePathStyle: true,
   });
+  return _s3Client;
 }

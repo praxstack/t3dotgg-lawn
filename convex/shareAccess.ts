@@ -1,10 +1,13 @@
+import { v } from "convex/values";
 import { Doc, Id } from "./_generated/dataModel";
-import { MutationCtx, QueryCtx } from "./_generated/server";
+import { internalMutation, MutationCtx, QueryCtx } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { generateUniqueToken } from "./security";
 
 type ReadCtx = QueryCtx | MutationCtx;
 
 export const SHARE_ACCESS_GRANT_TTL_MS = 24 * 60 * 60 * 1000;
+const EXPIRED_GRANT_SWEEP_BATCH_SIZE = 200;
 
 export async function findShareLinkByToken(ctx: ReadCtx, token: string) {
   return await ctx.db
@@ -20,7 +23,7 @@ export async function cleanupExpiredShareAccessGrantsForLink(
   const grants = await ctx.db
     .query("shareAccessGrants")
     .withIndex("by_share_link", (q) => q.eq("shareLinkId", shareLinkId))
-    .collect();
+    .take(EXPIRED_GRANT_SWEEP_BATCH_SIZE);
 
   const now = Date.now();
   for (const grant of grants) {
@@ -35,7 +38,9 @@ export async function issueShareAccessGrant(
   shareLinkId: Id<"shareLinks">,
   ttlMs = SHARE_ACCESS_GRANT_TTL_MS,
 ) {
-  await cleanupExpiredShareAccessGrantsForLink(ctx, shareLinkId);
+  // Expired grants are reaped by a periodic cron (sweepExpiredShareAccessGrants)
+  // and when a share link is deleted (deleteShareAccessGrantsForLink), so we
+  // don't scan + delete on every single access grant issuance.
 
   const token = await generateUniqueToken(
     40,
@@ -85,3 +90,31 @@ export async function resolveActiveShareGrant(
 
   return { grant, shareLink };
 }
+
+/**
+ * Deletes a bounded batch of expired share access grants across all links.
+ * Reschedules itself when more remain so each invocation stays within Convex's
+ * per-transaction limits. Driven by an hourly cron so the hot access-grant
+ * path never pays the cleanup cost.
+ */
+export const sweepExpiredShareAccessGrants = internalMutation({
+  args: {},
+  returns: v.object({ deleted: v.number() }),
+  handler: async (ctx) => {
+    const now = Date.now();
+    const expired = await ctx.db
+      .query("shareAccessGrants")
+      .withIndex("by_expires_at", (q) => q.lt("expiresAt", now))
+      .take(EXPIRED_GRANT_SWEEP_BATCH_SIZE);
+
+    for (const grant of expired) {
+      await ctx.db.delete(grant._id);
+    }
+
+    if (expired.length === EXPIRED_GRANT_SWEEP_BATCH_SIZE) {
+      await ctx.scheduler.runAfter(0, internal.shareAccess.sweepExpiredShareAccessGrants, {});
+    }
+
+    return { deleted: expired.length };
+  },
+});

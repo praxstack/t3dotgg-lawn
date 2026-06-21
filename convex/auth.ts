@@ -103,7 +103,20 @@ export async function requireProjectAccess(
     throw new Error("Project not found");
   }
 
-  const { membership } = await requireTeamAccess(ctx, project.teamId, requiredRole);
+  const membership = await ctx.db
+    .query("teamMembers")
+    .withIndex("by_team_and_user", (q) =>
+      q.eq("teamId", project.teamId).eq("userClerkId", user.subject),
+    )
+    .unique();
+
+  if (!membership) {
+    throw new Error("Not a team member");
+  }
+
+  if (requiredRole && ROLE_HIERARCHY[membership.role] < ROLE_HIERARCHY[requiredRole]) {
+    throw new Error(`Requires ${requiredRole} role or higher`);
+  }
 
   return { user, membership, project };
 }
@@ -120,7 +133,25 @@ export async function requireVideoAccess(
     throw new Error("Video not found");
   }
 
-  const { membership, project } = await requireProjectAccess(ctx, video.projectId, requiredRole);
+  const project = await ctx.db.get(video.projectId);
+  if (!project) {
+    throw new Error("Project not found");
+  }
+
+  const membership = await ctx.db
+    .query("teamMembers")
+    .withIndex("by_team_and_user", (q) =>
+      q.eq("teamId", project.teamId).eq("userClerkId", user.subject),
+    )
+    .unique();
+
+  if (!membership) {
+    throw new Error("Not a team member");
+  }
+
+  if (requiredRole && ROLE_HIERARCHY[membership.role] < ROLE_HIERARCHY[requiredRole]) {
+    throw new Error(`Requires ${requiredRole} role or higher`);
+  }
 
   return { user, membership, project, video };
 }

@@ -126,25 +126,29 @@ export const listWithProjects = query({
           )
           .collect();
 
-        // Get video + subfolder counts for each root folder
+        // Get video + subfolder counts for each root folder. Counts are capped
+        // at 100 via .take(101) so a folder with thousands of items doesn't
+        // materialize them all just to read .length.
         const projectsWithCounts = await Promise.all(
           projects.map(async (project) => {
-            const videos = await ctx.db
+            const videoPage = await ctx.db
               .query("videos")
               .withIndex("by_project_and_superseded_by_video_id", (q) =>
                 q.eq("projectId", project._id).eq("supersededByVideoId", undefined),
               )
-              .collect();
-            const subfolders = await ctx.db
+              .take(101);
+            const subfolderPage = await ctx.db
               .query("projects")
               .withIndex("by_team_and_parent", (q) =>
                 q.eq("teamId", team._id).eq("parentId", project._id),
               )
-              .collect();
+              .take(101);
             return {
               ...project,
-              videoCount: videos.length,
-              subfolderCount: subfolders.length,
+              videoCount: videoPage.length === 101 ? 100 : videoPage.length,
+              subfolderCount: subfolderPage.length === 101 ? 100 : subfolderPage.length,
+              videoCountIsCapped: videoPage.length === 101,
+              subfolderCountIsCapped: subfolderPage.length === 101,
             };
           }),
         );
@@ -224,8 +228,7 @@ export const inviteMember = mutation({
 
     const existingInvite = await ctx.db
       .query("teamInvites")
-      .withIndex("by_email", (q) => q.eq("email", inviteEmail))
-      .filter((q) => q.eq(q.field("teamId"), args.teamId))
+      .withIndex("by_team_and_email", (q) => q.eq("teamId", args.teamId).eq("email", inviteEmail))
       .unique();
 
     if (existingInvite) {
@@ -343,8 +346,10 @@ export const removeMember = mutation({
   handler: async (ctx, args) => {
     const { user } = await requireTeamAccess(ctx, args.teamId, "admin");
 
-    const team = await ctx.db.get(args.teamId);
-    const membership = await ctx.db.get(args.membershipId);
+    const [team, membership] = await Promise.all([
+      ctx.db.get(args.teamId),
+      ctx.db.get(args.membershipId),
+    ]);
 
     if (!team || !membership) {
       throw new Error("User is not a member of this team");
@@ -375,8 +380,10 @@ export const updateMemberRole = mutation({
   handler: async (ctx, args) => {
     await requireTeamAccess(ctx, args.teamId, "admin");
 
-    const team = await ctx.db.get(args.teamId);
-    const membership = await ctx.db.get(args.membershipId);
+    const [team, membership] = await Promise.all([
+      ctx.db.get(args.teamId),
+      ctx.db.get(args.membershipId),
+    ]);
 
     if (!team || !membership || membership.teamId !== team._id) {
       throw new Error("User is not a member of this team");

@@ -13,7 +13,6 @@ export default defineSchema({
     billingStatus: v.optional(v.string()),
   })
     .index("by_slug", ["slug"])
-    .index("by_owner", ["ownerClerkId"])
     .index("by_stripe_customer_id", ["stripeCustomerId"])
     .index("by_stripe_subscription_id", ["stripeSubscriptionId"]),
 
@@ -41,7 +40,8 @@ export default defineSchema({
   })
     .index("by_team", ["teamId"])
     .index("by_email", ["email"])
-    .index("by_token", ["token"]),
+    .index("by_token", ["token"])
+    .index("by_team_and_email", ["teamId", "email"]),
 
   projects: defineTable({
     teamId: v.id("teams"),
@@ -158,5 +158,6 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_token", ["token"])
-    .index("by_share_link", ["shareLinkId"]),
+    .index("by_share_link", ["shareLinkId"])
+    .index("by_expires_at", ["expiresAt"]),
 });

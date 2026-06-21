@@ -65,13 +65,17 @@ export const heartbeat = mutation({
       }
     }
 
-    const hasTokenAccess = await hasShareTokenAccess(ctx, args.shareToken, args.videoId);
-
-    if (!hasVideoAccess && !hasTokenAccess) {
-      throw new ConvexError({
-        code: "UNAUTHORIZED",
-        message: "You do not have access to this video.",
-      });
+    // Only check share-token access when video membership didn't already grant
+    // access. This avoids a by_token index read on every authenticated
+    // heartbeat (the hottest path in the app).
+    if (!hasVideoAccess) {
+      const hasTokenAccess = await hasShareTokenAccess(ctx, args.shareToken, args.videoId);
+      if (!hasTokenAccess) {
+        throw new ConvexError({
+          code: "UNAUTHORIZED",
+          message: "You do not have access to this video.",
+        });
+      }
     }
 
     const roomId = roomIdForVideo(args.videoId);

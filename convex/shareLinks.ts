@@ -306,16 +306,12 @@ export const issueAccessGrant = mutation({
         successUpdates.password = undefined;
       }
 
-      if (Object.keys(successUpdates).length > 0) {
-        await ctx.db.patch(link._id, successUpdates);
-      }
+      await ctx.db.patch(link._id, { ...successUpdates, viewCount: link.viewCount + 1 });
+    } else {
+      await ctx.db.patch(link._id, { viewCount: link.viewCount + 1 });
     }
 
     const grantToken = await issueShareAccessGrant(ctx, link._id);
-
-    await ctx.db.patch(link._id, {
-      viewCount: link.viewCount + 1,
-    });
 
     return {
       ok: true,
