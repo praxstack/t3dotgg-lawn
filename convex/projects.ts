@@ -121,24 +121,29 @@ function buildFolderPath(
   return parts.reverse().join(" / ");
 }
 
-/** Number of videos and direct child folders for a folder (for card badges). */
+/** Number of videos and direct child folders for a folder (for card badges).
+ *  Counts are capped at 100 via .take(101) so a folder with thousands of items
+ *  doesn't materialize them all just to read .length. */
 async function folderCounts(
   ctx: QueryCtx,
   project: Doc<"projects">,
 ): Promise<{ videoCount: number; subfolderCount: number }> {
-  const videos = await ctx.db
+  const videoPage = await ctx.db
     .query("videos")
     .withIndex("by_project_and_superseded_by_video_id", (q) =>
       q.eq("projectId", project._id).eq("supersededByVideoId", undefined),
     )
-    .collect();
-  const subfolders = await ctx.db
+    .take(101);
+  const subfolderPage = await ctx.db
     .query("projects")
     .withIndex("by_team_and_parent", (q) =>
       q.eq("teamId", project.teamId).eq("parentId", project._id),
     )
-    .collect();
-  return { videoCount: videos.length, subfolderCount: subfolders.length };
+    .take(101);
+  return {
+    videoCount: videoPage.length === 101 ? 100 : videoPage.length,
+    subfolderCount: subfolderPage.length === 101 ? 100 : subfolderPage.length,
+  };
 }
 
 // --- mutations / queries ---------------------------------------------------
@@ -389,13 +394,17 @@ export const move = mutation({
         steps++;
       }
 
-      const currentDepth = (await collectAncestors(ctx, project)).length;
-      const newParentDepth = (await collectAncestors(ctx, newParent)).length;
-      const newDepth = newParentDepth + 1;
+      const [currentDepth, newParentDepth] = await Promise.all([
+        collectAncestors(ctx, project),
+        collectAncestors(ctx, newParent),
+      ]);
+      const currentDepthLength = currentDepth.length;
+      const newParentDepthLength = newParentDepth.length;
+      const newDepth = newParentDepthLength + 1;
       if (newDepth > MAX_FOLDER_DEPTH) {
         throw new Error(`Folders can only be nested ${MAX_FOLDER_DEPTH} levels deep`);
       }
-      if (newDepth > currentDepth) {
+      if (newDepth > currentDepthLength) {
         await assertSubtreeFitsDepth(ctx, project, newDepth);
       }
     }

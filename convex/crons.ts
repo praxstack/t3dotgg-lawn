@@ -21,4 +21,10 @@ crons.interval(
   internal.videoActions.sweepMuxAssetStatuses,
 );
 
+crons.interval(
+  "sweep expired share access grants",
+  { hours: 1 },
+  internal.shareAccess.sweepExpiredShareAccessGrants,
+);
+
 export default crons;

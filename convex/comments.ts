@@ -54,10 +54,10 @@ export const list = query({
 
     const comments = await ctx.db
       .query("comments")
-      .withIndex("by_video", (q) => q.eq("videoId", args.videoId))
+      .withIndex("by_video_and_timestamp", (q) => q.eq("videoId", args.videoId))
       .collect();
 
-    return comments.sort((a, b) => a.timestampSeconds - b.timestampSeconds);
+    return comments;
   },
 });
 

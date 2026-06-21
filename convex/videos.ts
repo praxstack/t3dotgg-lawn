@@ -380,13 +380,15 @@ async function deleteVersionAndRenumberStack(ctx: MutationCtx, video: Doc<"video
   const survivors = oldestToNewest.filter((stackVersion) => stackVersion._id !== video._id);
 
   if (video.versionStackId) {
-    for (const [index, survivor] of survivors.entries()) {
-      await ctx.db.patch(survivor._id, {
-        versionStackId: video.versionStackId,
-        versionNumber: index + 1,
-        supersededByVideoId: survivors[index + 1]?._id,
-      });
-    }
+    await Promise.all(
+      survivors.map((survivor, index) =>
+        ctx.db.patch(survivor._id, {
+          versionStackId: video.versionStackId,
+          versionNumber: index + 1,
+          supersededByVideoId: survivors[index + 1]?._id,
+        }),
+      ),
+    );
   }
 
   await ctx.db.delete(video._id);
@@ -513,14 +515,16 @@ export const createVersion = mutation({
     contentType: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const { user, video: sourceVideo } = await requireVideoAccess(
-      ctx,
-      args.sourceVideoId,
-      "member",
-    );
+    const {
+      user,
+      video: sourceVideo,
+      project,
+    } = await requireVideoAccess(ctx, args.sourceVideoId, "member");
     const { versions, latest } = await getStackVersions(ctx, sourceVideo);
-    const { project } = await requireProjectAccess(ctx, latest.projectId, "member");
 
+    // requireVideoAccess already verified team membership on the source video's
+    // project; the new version inherits the same project, so no second access
+    // check is needed.
     assertVideoFileSizeAllowed(args.fileSize ?? 0);
     await assertTeamCanStoreBytes(ctx, project.teamId, args.fileSize ?? 0);
 
@@ -547,21 +551,23 @@ export const list = query({
         q.eq("projectId", args.projectId).eq("supersededByVideoId", undefined),
       )
       .order("desc")
-      .collect();
+      .take(200);
 
     return await Promise.all(
       videos.map(async (video) => {
-        const comments = await ctx.db
+        // Cap the per-video comment count scan at 201 so a video with thousands
+        // of comments doesn't materialize them all just to read .length.
+        const commentPage = await ctx.db
           .query("comments")
           .withIndex("by_video", (q) => q.eq("videoId", video._id))
-          .collect();
+          .take(201);
 
         return {
           ...video,
           uploaderName: video.uploaderName ?? "Unknown",
           workflowStatus: normalizeWorkflowStatus(video.workflowStatus),
           versionNumber: normalizeVersionNumber(video),
-          commentCount: comments.length,
+          commentCount: commentPage.length === 201 ? 200 : commentPage.length,
         };
       }),
     );
@@ -926,9 +932,9 @@ export const move = mutation({
       throw new Error("Can't move a video to a different team");
     }
 
-    for (const version of versions) {
-      await ctx.db.patch(version._id, { projectId: args.projectId });
-    }
+    await Promise.all(
+      versions.map((version) => ctx.db.patch(version._id, { projectId: args.projectId })),
+    );
   },
 });
 
@@ -944,11 +950,13 @@ export const setVisibility = mutation({
     // every version in the stack so the public/private state can't drift between
     // versions (each version carries its own `visibility` row).
     const versions = await readStackVersionsForUpdate(ctx, video);
-    for (const version of versions) {
-      if (version.visibility !== args.visibility) {
-        await ctx.db.patch(version._id, { visibility: args.visibility });
-      }
-    }
+    await Promise.all(
+      versions.map((version) =>
+        version.visibility !== args.visibility
+          ? ctx.db.patch(version._id, { visibility: args.visibility })
+          : Promise.resolve(),
+      ),
+    );
   },
 });
 
@@ -963,11 +971,13 @@ export const setPublicVersionBrowsing = mutation({
     // Like visibility, version browsing is a property of the whole video. Keep it
     // consistent across every version in the stack.
     const versions = await readStackVersionsForUpdate(ctx, video);
-    for (const version of versions) {
-      if (publicVersionBrowsingEnabled(version) !== args.enabled) {
-        await ctx.db.patch(version._id, { allowPublicVersionBrowsing: args.enabled });
-      }
-    }
+    await Promise.all(
+      versions.map((version) =>
+        publicVersionBrowsingEnabled(version) !== args.enabled
+          ? ctx.db.patch(version._id, { allowPublicVersionBrowsing: args.enabled })
+          : Promise.resolve(),
+      ),
+    );
   },
 });
 
@@ -1153,6 +1163,7 @@ export const markAsProcessing = internalMutation({
       s3MultipartPartSizeBytes: undefined,
       s3MultipartPartCount: undefined,
       uploadUpdatedAt: Date.now(),
+      muxLastPolledAt: Date.now(),
     });
   },
 });
@@ -1284,17 +1295,15 @@ export const listStaleUploadCandidates = internalQuery({
     limit: v.number(),
   },
   handler: async (ctx, args) => {
-    const candidates = (
-      await ctx.db
-        .query("videos")
-        .withIndex("by_status_and_upload_updated_at", (q) => q.eq("status", "uploading"))
-        .take(args.limit)
-    )
-      .filter((video) => (video.uploadUpdatedAt ?? video._creationTime) < args.cutoff)
-      .sort(
-        (a, b) => (a.uploadUpdatedAt ?? a._creationTime) - (b.uploadUpdatedAt ?? b._creationTime),
+    // All uploading videos set uploadUpdatedAt at creation time (create /
+    // insertVersionRecord / setUploadInfo), so the field is never undefined for
+    // status === "uploading" and the index range covers every candidate.
+    const candidates = await ctx.db
+      .query("videos")
+      .withIndex("by_status_and_upload_updated_at", (q) =>
+        q.eq("status", "uploading").lt("uploadUpdatedAt", args.cutoff),
       )
-      .slice(0, args.limit);
+      .take(args.limit);
 
     return candidates.map((video) => ({ videoId: video._id }));
   },
@@ -1374,6 +1383,7 @@ export const setMuxAssetReference = internalMutation({
       s3MultipartPartSizeBytes: undefined,
       s3MultipartPartCount: undefined,
       uploadUpdatedAt: Date.now(),
+      muxLastPolledAt: Date.now(),
     });
   },
 });
@@ -1455,10 +1465,12 @@ export const claimMuxProcessingCandidates = internalMutation({
     limit: v.number(),
   },
   handler: async (ctx, args) => {
+    // by_status_and_mux_asset_id excludes videos whose muxAssetId is undefined
+    // (Convex drops undefined fields from indexes), so this naturally returns
+    // only processing videos that actually have a Mux asset to poll.
     const videos = await ctx.db
       .query("videos")
-      .withIndex("by_status_and_mux_last_polled_at", (q) => q.eq("status", "processing"))
-      .filter((q) => q.neq(q.field("muxAssetId"), undefined))
+      .withIndex("by_status_and_mux_asset_id", (q) => q.eq("status", "processing"))
       .take(args.limit);
 
     const claimedAt = Date.now();
