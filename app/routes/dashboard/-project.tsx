@@ -38,7 +38,8 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Id } from "@convex/_generated/dataModel";
 import { cn } from "@/lib/utils";
-import { projectPath, teamHomePath, videoPath } from "@/lib/routes";
+import { projectPath, teamHomePath, videoPath, watchPath } from "@/lib/routes";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import { ProjectCard } from "@/components/projects/ProjectCard";
 import { MoveProjectDialog } from "@/components/projects/MoveProjectDialog";
 import { MoveVideoDialog } from "@/components/videos/MoveVideoDialog";
@@ -56,41 +57,14 @@ import { prewarmTeam } from "./-team.data";
 import { prewarmVideo } from "./-video.data";
 import { useDashboardUploadContext } from "@/lib/dashboardUploadContext";
 import { DashboardHeader } from "@/components/DashboardHeader";
+import { createRequestEpoch } from "@/lib/requestEpoch";
 
 type ViewMode = "grid" | "list";
 type ShareToastState = {
   tone: "success" | "error";
   message: string;
+  url?: string;
 };
-
-async function copyTextToClipboard(text: string) {
-  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return true;
-  }
-
-  if (typeof document === "undefined") {
-    return false;
-  }
-
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.style.position = "fixed";
-  textarea.style.opacity = "0";
-  textarea.style.pointerEvents = "none";
-  document.body.appendChild(textarea);
-  textarea.focus();
-  textarea.select();
-
-  let copied = false;
-  try {
-    copied = document.execCommand("copy");
-  } finally {
-    document.body.removeChild(textarea);
-  }
-
-  return copied;
-}
 
 type VideoIntentTargetProps = {
   className: string;
@@ -193,6 +167,9 @@ export default function ProjectPage({
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [shareToast, setShareToast] = useState<ShareToastState | null>(null);
   const shareToastTimeoutRef = useRef<number | null>(null);
+  const shareRequestEpochRef = useRef(createRequestEpoch());
+  const sharePendingRef = useRef(false);
+  const [sharePending, setSharePending] = useState(false);
   const [createFolderOpen, setCreateFolderOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
@@ -235,6 +212,7 @@ export default function ProjectPage({
 
   useEffect(
     () => () => {
+      shareRequestEpochRef.current.invalidate();
       if (shareToastTimeoutRef.current !== null) {
         window.clearTimeout(shareToastTimeoutRef.current);
       }
@@ -332,46 +310,54 @@ export default function ProjectPage({
     [updateVideoWorkflowStatus],
   );
 
-  const showShareToast = useCallback((tone: ShareToastState["tone"], message: string) => {
-    setShareToast({ tone, message });
+  const showShareToast = useCallback((toast: ShareToastState, autoDismiss: boolean) => {
+    setShareToast(toast);
     if (shareToastTimeoutRef.current !== null) {
       window.clearTimeout(shareToastTimeoutRef.current);
-    }
-    shareToastTimeoutRef.current = window.setTimeout(() => {
-      setShareToast(null);
       shareToastTimeoutRef.current = null;
-    }, 2400);
+    }
+    if (autoDismiss) {
+      shareToastTimeoutRef.current = window.setTimeout(() => {
+        setShareToast(null);
+        shareToastTimeoutRef.current = null;
+      }, 2400);
+    }
   }, []);
 
   const handleShareVideo = useCallback(
-    async (video: {
-      _id: Id<"videos">;
-      publicId?: string;
-      status: string;
-      visibility: "public" | "private";
-    }) => {
-      const canSharePublicly =
-        Boolean(video.publicId) && video.status === "ready" && video.visibility === "public";
-      const path = canSharePublicly
-        ? `/watch/${video.publicId}`
-        : videoPath(resolvedTeamSlug, projectId, video._id);
+    async (video: { _id: Id<"videos">; publicId?: string; visibility: "public" | "private" }) => {
+      if (sharePendingRef.current) return;
+      sharePendingRef.current = true;
+      setSharePending(true);
+      setShareToast(null);
+      const requestEpoch = shareRequestEpochRef.current.next();
+      const publicWatchPath =
+        video.visibility === "public" && video.publicId ? watchPath(video.publicId) : null;
+      const path = publicWatchPath ?? videoPath(resolvedTeamSlug, projectId, video._id);
       const origin = typeof window !== "undefined" ? window.location.origin : "";
       const url = `${origin}${path}`;
 
       try {
         const copied = await copyTextToClipboard(url);
+        if (!shareRequestEpochRef.current.isCurrent(requestEpoch)) return;
+        sharePendingRef.current = false;
+        setSharePending(false);
         if (!copied) {
-          showShareToast("error", "Could not copy link");
+          showShareToast({ tone: "error", message: "Could not copy link", url }, false);
           return;
         }
         showShareToast(
-          "success",
-          canSharePublicly
-            ? "Share link copied"
-            : "Video link copied (public watch link not available yet)",
+          {
+            tone: "success",
+            message: publicWatchPath ? "Share link copied" : "Private dashboard link copied",
+          },
+          true,
         );
       } catch {
-        showShareToast("error", "Could not copy link");
+        if (!shareRequestEpochRef.current.isCurrent(requestEpoch)) return;
+        sharePendingRef.current = false;
+        setSharePending(false);
+        showShareToast({ tone: "error", message: "Could not copy link", url }, false);
       }
     },
     [projectId, resolvedTeamSlug, showShareToast],
@@ -635,6 +621,7 @@ export default function ProjectPage({
                               </DropdownMenuItem>
                             )}
                             <DropdownMenuItem
+                              disabled={sharePending}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 void handleShareVideo(video);
@@ -854,6 +841,7 @@ export default function ProjectPage({
                           </DropdownMenuItem>
                         )}
                         <DropdownMenuItem
+                          disabled={sharePending}
                           onClick={(e) => {
                             e.stopPropagation();
                             void handleShareVideo(video);
@@ -912,8 +900,10 @@ export default function ProjectPage({
       </div>
 
       {shareToast ? (
-        <div className="fixed top-4 right-4 z-50" aria-live="polite">
+        <div className="fixed top-4 right-4 z-50 w-[min(28rem,calc(100vw-2rem))]">
           <div
+            role={shareToast.tone === "error" ? "alert" : "status"}
+            aria-live={shareToast.tone === "error" ? "assertive" : "polite"}
             className={cn(
               "border-2 px-3 py-2 text-sm font-bold shadow-[4px_4px_0px_0px_var(--shadow-color)]",
               shareToast.tone === "success"
@@ -921,7 +911,22 @@ export default function ProjectPage({
                 : "border-[#dc2626] bg-[#fef2f2] text-[#dc2626]",
             )}
           >
-            {shareToast.message}
+            <p>{shareToast.message}</p>
+            {shareToast.url ? (
+              <div className="mt-2 space-y-2">
+                <Input
+                  aria-label="Link to copy manually"
+                  className="bg-white font-mono text-xs font-normal"
+                  readOnly
+                  value={shareToast.url}
+                  onFocus={(event) => event.currentTarget.select()}
+                  onClick={(event) => event.currentTarget.select()}
+                />
+                <Button size="sm" variant="outline" onClick={() => setShareToast(null)}>
+                  Dismiss
+                </Button>
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}

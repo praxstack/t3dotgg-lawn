@@ -236,3 +236,66 @@ test("returns null for an unknown public id", async () => {
   const result = await t.query(api.videos.getByPublicId, { publicId: "does-not-exist" });
   expect(result).toBeNull();
 });
+
+test("dashboard aliases resolve public ids throughout the upload lifecycle", async () => {
+  const { t, projectId } = await seedPublicStack();
+
+  for (const status of ["uploading", "processing", "ready", "failed"] as const) {
+    const videoId = await t.run((ctx) =>
+      ctx.db.insert("videos", {
+        projectId,
+        uploadedByClerkId: "user_1",
+        uploaderName: "Owner",
+        title: `${status} video`,
+        visibility: "public",
+        publicId: `alias-${status}`,
+        status,
+        workflowStatus: "review",
+      }),
+    );
+
+    await expect(t.query(api.videos.getPublicIdByVideoId, { videoId })).resolves.toBe(
+      `alias-${status}`,
+    );
+  }
+});
+
+test("dashboard aliases do not reveal private, missing, or malformed video ids", async () => {
+  const { t, projectId } = await seedPublicStack();
+  const privateVideoId = await t.run((ctx) =>
+    ctx.db.insert("videos", {
+      projectId,
+      uploadedByClerkId: "user_1",
+      uploaderName: "Owner",
+      title: "Private video",
+      visibility: "private",
+      publicId: "private-alias",
+      status: "ready",
+      workflowStatus: "review",
+    }),
+  );
+  const missingVideoId = await t.run(async (ctx) => {
+    const videoId = await ctx.db.insert("videos", {
+      projectId,
+      uploadedByClerkId: "user_1",
+      uploaderName: "Owner",
+      title: "Deleted video",
+      visibility: "public",
+      publicId: "deleted-alias",
+      status: "ready",
+      workflowStatus: "review",
+    });
+    await ctx.db.delete(videoId);
+    return videoId;
+  });
+
+  await expect(
+    t.query(api.videos.getPublicIdByVideoId, { videoId: privateVideoId }),
+  ).resolves.toBeNull();
+  await expect(
+    t.query(api.videos.getPublicIdByVideoId, { videoId: missingVideoId }),
+  ).resolves.toBeNull();
+  await expect(
+    t.query(api.videos.getPublicIdByVideoId, { videoId: "not-a-convex-id" }),
+  ).resolves.toBeNull();
+});

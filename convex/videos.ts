@@ -831,7 +831,7 @@ export const getPublicIdByVideoId = query({
     }
 
     const video = await ctx.db.get(normalizedVideoId);
-    if (!video || video.visibility !== "public" || video.status !== "ready" || !video.publicId) {
+    if (!video || video.visibility !== "public" || !video.publicId) {
       return null;
     }
 
