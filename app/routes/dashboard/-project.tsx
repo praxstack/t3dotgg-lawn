@@ -388,12 +388,13 @@ export default function ProjectPage({
 
   const canUpload = project?.role !== "viewer";
   const canDeleteVideo = project?.role === "owner" || project?.role === "admin";
+  const activeProjectId = project?._id ?? resolvedProjectId ?? projectId;
   const hasChildFolders = (childFolders?.length ?? 0) > 0;
   const hasVideos = (videos?.length ?? 0) > 0;
   const showEmptyDropzone = !isLoadingData && !hasVideos && !hasChildFolders;
   const breadcrumbSegments =
     breadcrumb ??
-    (project ? [{ _id: project._id, name: project.name }] : [{ _id: projectId, name: " " }]);
+    (project ? [{ _id: activeProjectId, name: project.name }] : [{ _id: projectId, name: " " }]);
 
   return (
     <div className="flex h-full flex-col">
@@ -550,7 +551,7 @@ export default function ProjectPage({
                     key={video._id}
                     className="group flex cursor-pointer flex-col"
                     teamSlug={resolvedTeamSlug}
-                    projectId={project._id}
+                    projectId={activeProjectId}
                     videoId={video._id}
                     muxPlaybackId={video.muxPlaybackId}
                     dragDisabled={!canUpload || !teamId || !resolvedProjectId}
@@ -563,7 +564,7 @@ export default function ProjectPage({
                     }}
                     onOpen={() =>
                       navigate({
-                        to: videoPath(resolvedTeamSlug, project._id, video._id),
+                        to: videoPath(resolvedTeamSlug, activeProjectId, video._id),
                       })
                     }
                   >
@@ -649,7 +650,7 @@ export default function ProjectPage({
                                   setMoveVideoTarget({
                                     _id: video._id,
                                     title: video.title,
-                                    projectId: project._id,
+                                    projectId: activeProjectId,
                                     versionNumber: video.versionNumber,
                                   });
                                 }}
@@ -732,7 +733,7 @@ export default function ProjectPage({
                   key={video._id}
                   className="group flex cursor-pointer items-center gap-5 px-6 py-3 transition-colors hover:bg-[#e8e8e0]"
                   teamSlug={resolvedTeamSlug}
-                  projectId={project._id}
+                  projectId={activeProjectId}
                   videoId={video._id}
                   muxPlaybackId={video.muxPlaybackId}
                   dragDisabled={!canUpload || !teamId || !resolvedProjectId}
@@ -745,7 +746,7 @@ export default function ProjectPage({
                   }}
                   onOpen={() =>
                     navigate({
-                      to: videoPath(resolvedTeamSlug, project._id, video._id),
+                      to: videoPath(resolvedTeamSlug, activeProjectId, video._id),
                     })
                   }
                 >
@@ -868,7 +869,7 @@ export default function ProjectPage({
                               setMoveVideoTarget({
                                 _id: video._id,
                                 title: video.title,
-                                projectId: project._id,
+                                projectId: activeProjectId,
                                 versionNumber: video.versionNumber,
                               });
                             }}
