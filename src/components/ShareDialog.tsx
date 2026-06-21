@@ -65,7 +65,7 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
   activeOpenRef.current = open;
 
   const isViewer = video?.role === "viewer";
-  const canManageSharing = video !== undefined && !isViewer;
+  const canManageSharing = video != null && !isViewer;
 
   const clearCopyFeedback = useCallback(() => {
     copySequenceRef.current += 1;
