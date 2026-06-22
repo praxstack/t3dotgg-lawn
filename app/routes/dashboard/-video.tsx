@@ -52,6 +52,10 @@ import { Id } from "@convex/_generated/dataModel";
 import { projectPath, teamHomePath, videoPath } from "@/lib/routes";
 import { findPreferredReplacementVideoId } from "@/lib/videoVersionDeletion";
 import { useRoutePrewarmIntent } from "@/lib/useRoutePrewarmIntent";
+import {
+  selectDashboardPlaybackUrl,
+  type DashboardPlaybackSource,
+} from "@/lib/dashboardPlaybackSource";
 import { prewarmProject } from "./-project.data";
 import { prewarmTeam } from "./-team.data";
 import { prewarmVideo, useVideoData } from "./-video.data";
@@ -325,7 +329,7 @@ export default function VideoPage() {
   } | null>(null);
   const [sourcePreference, setSourcePreference] = useState<{
     videoId: Id<"videos">;
-    source: "mux720" | "original";
+    source: DashboardPlaybackSource;
   } | null>(null);
   const [failedOriginalVideoId, setFailedOriginalVideoId] = useState<Id<"videos"> | null>(null);
   const [originalPlaybackIssue, setOriginalPlaybackIssue] = useState<{
@@ -347,14 +351,17 @@ export default function VideoPage() {
     playbackRequest?.videoId === resolvedVideoId ? playbackRequest.attempt : 0;
   const processingFailed = video?.status === "failed";
   const preferredSource =
-    sourcePreference?.videoId === resolvedVideoId ? sourcePreference.source : "original";
+    sourcePreference?.videoId === resolvedVideoId ? sourcePreference.source : "mux720";
   const originalPlaybackFailed = !processingFailed && failedOriginalVideoId === resolvedVideoId;
   const usableOriginalPlaybackUrl = originalPlaybackFailed ? null : originalPlaybackUrl;
   const activePlaybackUrl = processingFailed
     ? null
-    : preferredSource === "mux720"
-      ? (playbackUrl ?? usableOriginalPlaybackUrl)
-      : (usableOriginalPlaybackUrl ?? playbackUrl);
+    : selectDashboardPlaybackUrl({
+        preferredSource,
+        muxPlaybackReady: isPlayable,
+        muxUrl: playbackUrl,
+        originalUrl: usableOriginalPlaybackUrl,
+      });
   const activeQualityId =
     activePlaybackUrl && playbackUrl && activePlaybackUrl === playbackUrl ? "mux720" : "original";
   const isUsingOriginalFallback = Boolean(
