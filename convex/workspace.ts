@@ -18,19 +18,25 @@ function buildCanonicalPath(input: { teamSlug: string; projectId?: string; video
 export const resolveContext = query({
   args: {
     teamSlug: v.optional(v.string()),
-    projectId: v.optional(v.id("projects")),
-    videoId: v.optional(v.id("videos")),
+    projectId: v.optional(v.string()),
+    videoId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const user = await getUser(ctx);
     if (!user) return null;
 
+    const projectId = args.projectId ? ctx.db.normalizeId("projects", args.projectId) : undefined;
+    const videoId = args.videoId ? ctx.db.normalizeId("videos", args.videoId) : undefined;
+    if ((args.projectId && !projectId) || (args.videoId && !videoId)) {
+      return null;
+    }
+
     let team: Doc<"teams"> | null = null;
     let project: Doc<"projects"> | null = null;
     let video: Doc<"videos"> | null = null;
 
-    if (args.videoId) {
-      video = await ctx.db.get(args.videoId);
+    if (videoId) {
+      video = await ctx.db.get(videoId);
       if (!video) return null;
 
       project = await ctx.db.get(video.projectId);
@@ -38,8 +44,8 @@ export const resolveContext = query({
 
       team = await ctx.db.get(project.teamId);
       if (!team) return null;
-    } else if (args.projectId) {
-      project = await ctx.db.get(args.projectId);
+    } else if (projectId) {
+      project = await ctx.db.get(projectId);
       if (!project) return null;
 
       team = await ctx.db.get(project.teamId);

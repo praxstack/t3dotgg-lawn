@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
@@ -23,6 +23,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn, formatRelativeTime } from "@/lib/utils";
+import { copyTextToClipboard } from "@/lib/clipboard";
+import { watchPath } from "@/lib/routes";
+import { createRequestEpoch } from "@/lib/requestEpoch";
 
 interface ShareDialogProps {
   videoId: Id<"videos">;
@@ -41,14 +44,88 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
   const [isCreating, setIsCreating] = useState(false);
   const [isUpdatingVisibility, setIsUpdatingVisibility] = useState(false);
   const [isUpdatingVersionBrowsing, setIsUpdatingVersionBrowsing] = useState(false);
+  const [deletingLinkId, setDeletingLinkId] = useState<Id<"shareLinks"> | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copyStatus, setCopyStatus] = useState<{
+    tone: "success" | "error";
+    message: string;
+  } | null>(null);
+  const [copyFailureUrl, setCopyFailureUrl] = useState<string | null>(null);
+  const [mutationError, setMutationError] = useState<string | null>(null);
   const [newLinkOptions, setNewLinkOptions] = useState({
     expiresInDays: undefined as number | undefined,
     password: undefined as string | undefined,
   });
+  const copySequenceRef = useRef(0);
+  const copyTimeoutRef = useRef<number | null>(null);
+  const mutationContextEpochRef = useRef(createRequestEpoch());
+  const activeVideoIdRef = useRef(videoId);
+  const activeOpenRef = useRef(open);
+  activeVideoIdRef.current = videoId;
+  activeOpenRef.current = open;
+
+  const isViewer = video?.role === "viewer";
+  const canManageSharing = video != null && !isViewer;
+
+  const clearCopyFeedback = useCallback(() => {
+    copySequenceRef.current += 1;
+    if (copyTimeoutRef.current !== null) {
+      window.clearTimeout(copyTimeoutRef.current);
+      copyTimeoutRef.current = null;
+    }
+    setCopiedId(null);
+    setCopyStatus(null);
+    setCopyFailureUrl(null);
+  }, []);
+
+  const resetMutationState = useCallback(() => {
+    setIsCreating(false);
+    setIsUpdatingVisibility(false);
+    setIsUpdatingVersionBrowsing(false);
+    setDeletingLinkId(null);
+    setMutationError(null);
+    setNewLinkOptions({ expiresInDays: undefined, password: undefined });
+  }, []);
+
+  const isMutationCurrent = useCallback(
+    (contextEpoch: number, requestVideoId: Id<"videos">) =>
+      mutationContextEpochRef.current.isCurrent(contextEpoch) &&
+      activeVideoIdRef.current === requestVideoId &&
+      activeOpenRef.current,
+    [],
+  );
+
+  useEffect(() => {
+    mutationContextEpochRef.current.invalidate();
+    clearCopyFeedback();
+    resetMutationState();
+
+    return () => {
+      mutationContextEpochRef.current.invalidate();
+      copySequenceRef.current += 1;
+      if (copyTimeoutRef.current !== null) {
+        window.clearTimeout(copyTimeoutRef.current);
+        copyTimeoutRef.current = null;
+      }
+    };
+  }, [clearCopyFeedback, open, resetMutationState, videoId]);
+
+  const handleDialogOpenChange = (nextOpen: boolean) => {
+    activeOpenRef.current = nextOpen;
+    if (!nextOpen) {
+      mutationContextEpochRef.current.invalidate();
+      clearCopyFeedback();
+      resetMutationState();
+    }
+    onOpenChange(nextOpen);
+  };
 
   const handleCreateLink = async () => {
+    if (!canManageSharing) return;
+    const contextEpoch = mutationContextEpochRef.current.current();
+    const requestVideoId = videoId;
     setIsCreating(true);
+    setMutationError(null);
     try {
       await createShareLink({
         videoId,
@@ -56,71 +133,132 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
         allowDownload: false,
         password: newLinkOptions.password,
       });
+      if (!isMutationCurrent(contextEpoch, requestVideoId)) return;
       setNewLinkOptions({
         expiresInDays: undefined,
         password: undefined,
       });
-    } catch (error) {
-      console.error("Failed to create share link:", error);
+    } catch {
+      if (!isMutationCurrent(contextEpoch, requestVideoId)) return;
+      setMutationError("Could not create the restricted link. Please try again.");
     } finally {
-      setIsCreating(false);
+      if (isMutationCurrent(contextEpoch, requestVideoId)) {
+        setIsCreating(false);
+      }
     }
   };
 
   const handleSetVisibility = async (visibility: "public" | "private") => {
-    if (!video || isUpdatingVisibility || video.visibility === visibility) return;
+    if (!video || !canManageSharing || isUpdatingVisibility || video.visibility === visibility)
+      return;
+    const contextEpoch = mutationContextEpochRef.current.current();
+    const requestVideoId = videoId;
     setIsUpdatingVisibility(true);
+    setMutationError(null);
     try {
       await setVisibility({ videoId, visibility });
-    } catch (error) {
-      console.error("Failed to update visibility:", error);
+    } catch {
+      if (!isMutationCurrent(contextEpoch, requestVideoId)) return;
+      setMutationError("Could not update video visibility. Please try again.");
     } finally {
-      setIsUpdatingVisibility(false);
+      if (isMutationCurrent(contextEpoch, requestVideoId)) {
+        setIsUpdatingVisibility(false);
+      }
     }
   };
 
   const versionBrowsingEnabled = video?.allowPublicVersionBrowsing !== false;
 
   const handleSetVersionBrowsing = async (enabled: boolean) => {
-    if (!video || isUpdatingVersionBrowsing || versionBrowsingEnabled === enabled) return;
+    if (
+      !video ||
+      !canManageSharing ||
+      isUpdatingVersionBrowsing ||
+      versionBrowsingEnabled === enabled
+    )
+      return;
+    const contextEpoch = mutationContextEpochRef.current.current();
+    const requestVideoId = videoId;
     setIsUpdatingVersionBrowsing(true);
+    setMutationError(null);
     try {
       await setVersionBrowsing({ videoId, enabled });
-    } catch (error) {
-      console.error("Failed to update version browsing:", error);
+    } catch {
+      if (!isMutationCurrent(contextEpoch, requestVideoId)) return;
+      setMutationError("Could not update version browsing. Please try again.");
     } finally {
-      setIsUpdatingVersionBrowsing(false);
+      if (isMutationCurrent(contextEpoch, requestVideoId)) {
+        setIsUpdatingVersionBrowsing(false);
+      }
     }
   };
 
-  const handleCopyLink = (token: string) => {
-    const url = `${window.location.origin}/share/${token}`;
-    navigator.clipboard.writeText(url);
-    setCopiedId(token);
-    setTimeout(() => setCopiedId(null), 2000);
+  const copyLink = async (id: string, path: string) => {
+    const requestId = copySequenceRef.current + 1;
+    copySequenceRef.current = requestId;
+    if (copyTimeoutRef.current !== null) {
+      window.clearTimeout(copyTimeoutRef.current);
+      copyTimeoutRef.current = null;
+    }
+    setCopiedId(null);
+    setCopyStatus(null);
+    setCopyFailureUrl(null);
+    const url = `${window.location.origin}${path}`;
+    const copied = await copyTextToClipboard(url);
+    if (requestId !== copySequenceRef.current || activeVideoIdRef.current !== videoId || !open) {
+      return;
+    }
+    if (!copied) {
+      setCopyStatus({
+        tone: "error",
+        message: "Could not copy the link. Please copy it manually.",
+      });
+      setCopyFailureUrl(url);
+      return;
+    }
+
+    setCopiedId(id);
+    setCopyStatus({ tone: "success", message: "Link copied to clipboard." });
+    copyTimeoutRef.current = window.setTimeout(() => {
+      if (copySequenceRef.current === requestId) {
+        setCopiedId((current) => (current === id ? null : current));
+      }
+      copyTimeoutRef.current = null;
+    }, 2000);
   };
 
-  const handleCopyPublicLink = () => {
+  const handleCopyLink = async (token: string) => {
+    await copyLink(token, `/share/${token}`);
+  };
+
+  const handleCopyPublicLink = async () => {
     if (!video?.publicId) return;
-    const url = `${window.location.origin}/watch/${video.publicId}`;
-    navigator.clipboard.writeText(url);
-    setCopiedId("public");
-    setTimeout(() => setCopiedId(null), 2000);
+    await copyLink("public", watchPath(video.publicId));
   };
 
   const handleDeleteLink = async (linkId: Id<"shareLinks">) => {
+    if (!canManageSharing) return;
     if (!confirm("Are you sure you want to delete this share link?")) return;
+    const contextEpoch = mutationContextEpochRef.current.current();
+    const requestVideoId = videoId;
+    setDeletingLinkId(linkId);
+    setMutationError(null);
     try {
       await deleteShareLink({ linkId });
-    } catch (error) {
-      console.error("Failed to delete share link:", error);
+    } catch {
+      if (!isMutationCurrent(contextEpoch, requestVideoId)) return;
+      setMutationError("Could not delete the restricted link. Please try again.");
+    } finally {
+      if (isMutationCurrent(contextEpoch, requestVideoId)) {
+        setDeletingLinkId(null);
+      }
     }
   };
 
-  const publicWatchPath = video?.publicId ? `/watch/${video.publicId}` : null;
+  const publicWatchPath = video?.publicId ? watchPath(video.publicId) : null;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleDialogOpenChange}>
       <DialogContent className="max-h-[85vh] max-w-lg overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Share video</DialogTitle>
@@ -129,12 +267,51 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
           </DialogDescription>
         </DialogHeader>
 
+        {isViewer ? (
+          <p className="border-2 border-[#1a1a1a] bg-[#e8e8e0] px-3 py-2 text-sm text-[#1a1a1a]">
+            View-only access: you can copy or open links, but only team members can change sharing
+            settings.
+          </p>
+        ) : null}
+
+        {mutationError ? (
+          <p role="alert" aria-live="assertive" className="text-sm font-bold text-[#991b1b]">
+            {mutationError}
+          </p>
+        ) : null}
+
+        {copyStatus ? (
+          <div
+            role={copyStatus.tone === "error" ? "alert" : "status"}
+            aria-live={copyStatus.tone === "error" ? "assertive" : "polite"}
+            className={cn(
+              "border-2 px-3 py-2 text-sm font-bold",
+              copyStatus.tone === "success"
+                ? "border-[#2d5a2d] bg-[#dce8d8] text-[#2d5a2d]"
+                : "border-[#dc2626] bg-[#fee2e2] text-[#991b1b]",
+            )}
+          >
+            <p>{copyStatus.message}</p>
+            {copyFailureUrl ? (
+              <Input
+                className="mt-2 bg-white font-mono text-xs font-normal"
+                aria-label="Link to copy manually"
+                readOnly
+                value={copyFailureUrl}
+                onFocus={(event) => event.currentTarget.select()}
+                onClick={(event) => event.currentTarget.select()}
+              />
+            ) : null}
+          </div>
+        ) : null}
+
         {/* Visibility */}
         <div className="space-y-2">
           <div className="grid grid-cols-2 gap-2">
             <Button
               variant={video?.visibility === "public" ? "default" : "outline"}
-              disabled={isUpdatingVisibility || video === undefined}
+              disabled={!canManageSharing || isUpdatingVisibility}
+              aria-pressed={video?.visibility === "public"}
               onClick={() => void handleSetVisibility("public")}
             >
               <Globe className="mr-2 h-4 w-4" />
@@ -142,7 +319,8 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
             </Button>
             <Button
               variant={video?.visibility === "private" ? "default" : "outline"}
-              disabled={isUpdatingVisibility || video === undefined}
+              disabled={!canManageSharing || isUpdatingVisibility}
+              aria-pressed={video?.visibility === "private"}
               onClick={() => void handleSetVisibility("private")}
             >
               <Lock className="mr-2 h-4 w-4" />
@@ -165,7 +343,7 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
                 <Button
                   variant="outline"
                   size="icon"
-                  onClick={handleCopyPublicLink}
+                  onClick={() => void handleCopyPublicLink()}
                   aria-label="Copy public URL"
                 >
                   {copiedId === "public" ? (
@@ -204,7 +382,7 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
                   role="switch"
                   aria-checked={versionBrowsingEnabled}
                   aria-label="Version browsing"
-                  disabled={isUpdatingVersionBrowsing || video === undefined}
+                  disabled={!canManageSharing || isUpdatingVersionBrowsing}
                   onClick={() => void handleSetVersionBrowsing(!versionBrowsingEnabled)}
                   className={cn(
                     "relative h-7 w-12 shrink-0 border-2 border-[#1a1a1a] transition-colors disabled:opacity-50",
@@ -234,58 +412,64 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="w-full justify-between">
-                  {newLinkOptions.expiresInDays
-                    ? `${newLinkOptions.expiresInDays} days`
-                    : "Never expires"}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent>
-                <DropdownMenuItem
-                  onClick={() => setNewLinkOptions((o) => ({ ...o, expiresInDays: undefined }))}
-                >
-                  Never expires
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => setNewLinkOptions((o) => ({ ...o, expiresInDays: 1 }))}
-                >
-                  1 day
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => setNewLinkOptions((o) => ({ ...o, expiresInDays: 7 }))}
-                >
-                  7 days
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => setNewLinkOptions((o) => ({ ...o, expiresInDays: 30 }))}
-                >
-                  30 days
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <Input
-              type="password"
-              placeholder="Password (optional)"
-              value={newLinkOptions.password || ""}
-              onChange={(e) =>
-                setNewLinkOptions((o) => ({
-                  ...o,
-                  password: e.target.value || undefined,
-                }))
-              }
-            />
-          </div>
+          {canManageSharing ? (
+            <>
+              <div className="grid grid-cols-2 gap-2">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" className="w-full justify-between">
+                      {newLinkOptions.expiresInDays
+                        ? `${newLinkOptions.expiresInDays} days`
+                        : "Never expires"}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent>
+                    <DropdownMenuItem
+                      onClick={() => setNewLinkOptions((o) => ({ ...o, expiresInDays: undefined }))}
+                    >
+                      Never expires
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => setNewLinkOptions((o) => ({ ...o, expiresInDays: 1 }))}
+                    >
+                      1 day
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => setNewLinkOptions((o) => ({ ...o, expiresInDays: 7 }))}
+                    >
+                      7 days
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => setNewLinkOptions((o) => ({ ...o, expiresInDays: 30 }))}
+                    >
+                      30 days
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Input
+                  type="password"
+                  placeholder="Password (optional)"
+                  value={newLinkOptions.password || ""}
+                  onChange={(e) =>
+                    setNewLinkOptions((o) => ({
+                      ...o,
+                      password: e.target.value || undefined,
+                    }))
+                  }
+                />
+              </div>
 
-          <Button onClick={handleCreateLink} disabled={isCreating} className="w-full">
-            <Plus className="mr-2 h-4 w-4" />
-            {isCreating ? "Creating..." : "Create link"}
-          </Button>
+              <Button onClick={handleCreateLink} disabled={isCreating} className="w-full">
+                <Plus className="mr-2 h-4 w-4" />
+                {isCreating ? "Creating..." : "Create link"}
+              </Button>
+            </>
+          ) : null}
 
           {shareLinks === undefined ? (
-            <p className="text-sm text-[#888]">Loading...</p>
+            <p role="status" aria-live="polite" className="text-sm text-[#888]">
+              Loading links...
+            </p>
           ) : shareLinks.length === 0 ? (
             <p className="text-sm text-[#888]">No share links yet</p>
           ) : (
@@ -316,7 +500,12 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
-                    <Button variant="ghost" size="icon" onClick={() => handleCopyLink(link.token)}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => void handleCopyLink(link.token)}
+                      aria-label="Copy restricted link"
+                    >
                       {copiedId === link.token ? (
                         <Check className="h-4 w-4 text-[#2d5a2d]" />
                       ) : (
@@ -327,17 +516,22 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
                       variant="ghost"
                       size="icon"
                       onClick={() => window.open(`/share/${link.token}`, "_blank")}
+                      aria-label="Open restricted link"
                     >
                       <ExternalLink className="h-4 w-4" />
                     </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="text-[#dc2626] hover:text-[#dc2626]"
-                      onClick={() => handleDeleteLink(link._id)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    {canManageSharing ? (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-[#dc2626] hover:text-[#dc2626]"
+                        disabled={deletingLinkId !== null}
+                        onClick={() => void handleDeleteLink(link._id)}
+                        aria-label="Delete restricted link"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    ) : null}
                   </div>
                 </div>
               ))}

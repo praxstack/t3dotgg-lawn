@@ -1,5 +1,5 @@
 import { useAuth } from "@clerk/tanstack-react-start";
-import { useConvex, useQuery } from "convex/react";
+import { useConvex, useConvexAuth, useQuery } from "convex/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
@@ -16,8 +16,9 @@ import {
 import { UploadProgress } from "@/components/upload/UploadProgress";
 import { useVideoUploadManager } from "./-useVideoUploadManager";
 import { DashboardUploadProvider } from "@/lib/dashboardUploadContext";
-import { videoPath } from "@/lib/routes";
+import { videoPath, watchPath } from "@/lib/routes";
 import { prewarmVideo } from "./-video.data";
+import { resolveDashboardAccess } from "@/lib/dashboardAccess";
 
 const VIDEO_FILE_EXTENSIONS = /\.(mp4|mov|m4v|webm|avi|mkv)$/i;
 
@@ -31,25 +32,44 @@ function dragEventHasFiles(event: DragEvent) {
 
 export default function DashboardLayout() {
   const { isLoaded, userId } = useAuth();
+  const { isLoading: isConvexAuthLoading, isAuthenticated: isConvexAuthenticated } =
+    useConvexAuth();
   const convex = useConvex();
   const navigate = useNavigate({});
   const location = useLocation();
   const { pathname, searchStr } = location;
   const params = useParams({ strict: false });
   const teamSlug = typeof params.teamSlug === "string" ? params.teamSlug : undefined;
-  const routeProjectId =
-    typeof params.projectId === "string" ? (params.projectId as Id<"projects">) : undefined;
-  const routeVideoId =
-    typeof params.videoId === "string" ? (params.videoId as Id<"videos">) : undefined;
+  const rawProjectId = typeof params.projectId === "string" ? params.projectId : undefined;
+  const rawVideoId = typeof params.videoId === "string" ? params.videoId : undefined;
   const publicPlaybackId = useQuery(
     api.videos.getPublicIdByVideoId,
-    routeVideoId ? { videoId: routeVideoId } : "skip",
+    rawVideoId ? { videoId: rawVideoId } : "skip",
   );
-  const detailVideo = useQuery(
-    api.videos.get,
-    routeVideoId && userId ? { videoId: routeVideoId } : "skip",
+  const contextRequired = Boolean(teamSlug || rawProjectId || rawVideoId);
+  const workspaceContext = useQuery(
+    api.workspace.resolveContext,
+    isLoaded && Boolean(userId) && !isConvexAuthLoading && isConvexAuthenticated && contextRequired
+      ? { teamSlug, projectId: rawProjectId, videoId: rawVideoId }
+      : "skip",
   );
-  const uploadTargets = useQuery(api.projects.listUploadTargets, teamSlug ? { teamSlug } : {});
+  const access = resolveDashboardAccess({
+    clerkLoaded: isLoaded,
+    hasClerkUser: Boolean(userId),
+    convexAuthLoading: isConvexAuthLoading,
+    convexAuthenticated: isConvexAuthenticated,
+    contextRequired,
+    workspaceContext,
+    publicLookupRequired: Boolean(rawVideoId),
+    publicId: publicPlaybackId,
+  });
+  const routeProjectId = access.kind === "dashboard" ? workspaceContext?.project?._id : undefined;
+  const routeVideoId = access.kind === "dashboard" ? workspaceContext?.video?._id : undefined;
+  const detailVideo = useQuery(api.videos.get, routeVideoId ? { videoId: routeVideoId } : "skip");
+  const uploadTargets = useQuery(
+    api.projects.listUploadTargets,
+    access.kind === "dashboard" ? (teamSlug ? { teamSlug } : {}) : "skip",
+  );
   const { uploads, uploadFilesToProject, uploadNewVersion, cancelUpload, retryProcessing } =
     useVideoUploadManager();
   const [isGlobalDragActive, setIsGlobalDragActive] = useState(false);
@@ -217,40 +237,80 @@ export default function DashboardLayout() {
     }),
     [requestUpload, requestVersionUpload, uploads, cancelUpload, retryProcessing],
   );
-  const isResolvingPublicPlaybackExemption =
-    Boolean(isLoaded && !userId && routeVideoId) && publicPlaybackId === undefined;
+  const publicRedirectId = access.kind === "redirect-public" ? access.publicId : undefined;
+  const shouldRedirectToSignIn = access.kind === "redirect-sign-in";
 
   useEffect(() => {
-    if (!isLoaded || userId) return;
     if (typeof window === "undefined") return;
 
-    if (routeVideoId) {
-      if (publicPlaybackId === undefined) return;
-      if (publicPlaybackId) {
-        window.location.replace(`/watch/${publicPlaybackId}`);
-        return;
-      }
+    if (publicRedirectId) {
+      window.location.replace(watchPath(publicRedirectId));
+      return;
     }
 
-    const redirectUrl = `${pathname}${searchStr}`;
-    window.location.replace(`/sign-in?redirect_url=${encodeURIComponent(redirectUrl)}`);
-  }, [isLoaded, userId, pathname, searchStr, routeVideoId, publicPlaybackId]);
+    if (shouldRedirectToSignIn) {
+      const redirectUrl = `${pathname}${searchStr}`;
+      window.location.replace(`/sign-in?redirect_url=${encodeURIComponent(redirectUrl)}`);
+    }
+  }, [pathname, publicRedirectId, searchStr, shouldRedirectToSignIn]);
 
-  if (!isLoaded) {
+  if (access.kind === "loading") {
     return (
       <div className="flex h-full items-center justify-center bg-[#f0f0e8]">
-        <div className="text-[#888]">Loading...</div>
+        <div role="status" aria-live="polite" className="text-[#888]">
+          Checking access...
+        </div>
       </div>
     );
   }
 
-  if (!userId) {
+  if (access.kind === "redirect-public" || access.kind === "redirect-sign-in") {
     return (
       <div className="flex h-full items-center justify-center bg-[#f0f0e8]">
-        <div className="text-[#888]">
-          {isResolvingPublicPlaybackExemption
-            ? "Checking public playback access..."
-            : "Redirecting to sign in..."}
+        <div role="status" aria-live="polite" className="text-[#888]">
+          Redirecting...
+        </div>
+      </div>
+    );
+  }
+
+  if (access.kind === "auth-unavailable") {
+    return (
+      <div className="flex h-full items-center justify-center bg-[#f0f0e8] p-6">
+        <div
+          role="alert"
+          className="max-w-md border-2 border-[#1a1a1a] bg-[#f0f0e8] p-5 text-center shadow-[4px_4px_0px_0px_var(--shadow-color)]"
+        >
+          <p className="font-bold text-[#1a1a1a]">We couldn't verify your dashboard session.</p>
+          <p className="mt-1 text-sm text-[#888]">Try again, or return home and sign in again.</p>
+          <div className="mt-4 flex justify-center gap-2">
+            <button
+              type="button"
+              className="border-2 border-[#1a1a1a] bg-[#1a1a1a] px-3 py-2 text-sm font-bold text-[#f0f0e8]"
+              onClick={() => window.location.reload()}
+            >
+              Try again
+            </button>
+            <a
+              href="/"
+              className="border-2 border-[#1a1a1a] px-3 py-2 text-sm font-bold text-[#1a1a1a]"
+            >
+              Go home
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (access.kind === "not-found") {
+    return (
+      <div className="flex h-full items-center justify-center bg-[#f0f0e8] p-6">
+        <div role="alert" className="text-center text-[#888]">
+          <p>Video or workspace not found</p>
+          <a className="mt-3 inline-block font-bold text-[#1a1a1a] underline" href="/dashboard">
+            Back to dashboard
+          </a>
         </div>
       </div>
     );
