@@ -8,8 +8,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { DashboardSort } from "@/lib/dashboardSort";
-import { useQuery } from "convex/react";
-import { api } from "@convex/_generated/api";
 
 const labels: Record<DashboardSort, string> = {
   "last-uploaded": "Last uploaded",
@@ -23,9 +21,6 @@ export function DashboardSortControl({
   value: DashboardSort;
   onChange: (value: DashboardSort) => void;
 }) {
-  const alphabeticalReadiness = useQuery(api.dashboardSort.isAlphabeticalReady);
-  const alphabeticalReady = alphabeticalReadiness === true;
-
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -48,20 +43,7 @@ export function DashboardSortControl({
           }}
         >
           <DropdownMenuRadioItem value="last-uploaded">Last uploaded</DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="alphabetical" disabled={!alphabeticalReady}>
-            {alphabeticalReady ? (
-              "Alphabetical"
-            ) : (
-              <span className="flex flex-col">
-                <span>Alphabetical — preparing…</span>
-                <span className="text-[11px] font-normal text-[#888]">
-                  {alphabeticalReadiness === undefined
-                    ? "Checking title index availability"
-                    : "Finishing the one-time title index"}
-                </span>
-              </span>
-            )}
-          </DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="alphabetical">Alphabetical</DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>

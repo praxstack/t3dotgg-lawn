@@ -10,7 +10,6 @@ import {
 } from "./auth";
 import { getTeamSubscriptionState } from "./billingHelpers";
 import { deleteVideoAndDependents } from "./videos";
-import { latestProjectUploadAt } from "./projectRecency";
 
 function normalizedEmail(value: string) {
   return value.trim().toLowerCase();
@@ -148,7 +147,7 @@ export const listWithProjects = query({
             return {
               ...project,
               videoCount: videoPage.length === 101 ? 100 : videoPage.length,
-              lastUploadedAt: latestProjectUploadAt(project, videoPage[0]?._creationTime),
+              lastUploadedAt: videoPage[0]?._creationTime,
               subfolderCount: subfolderPage.length === 101 ? 100 : subfolderPage.length,
               videoCountIsCapped: videoPage.length === 101,
               subfolderCountIsCapped: subfolderPage.length === 101,
