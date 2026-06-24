@@ -146,7 +146,7 @@ export function DashboardHeader({
 
       {/* Children — second row on mobile, middle column on desktop */}
       {children && (
-        <div className="col-span-full flex min-w-0 items-center gap-2 overflow-x-auto pb-2 sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:h-14 sm:gap-3 sm:pb-0 sm:pl-4 [&>*]:shrink-0 sm:[&>*:first-child]:ml-auto">
+        <div className="scrollbar-hidden col-span-full flex min-w-0 items-center gap-2 overflow-x-auto pb-2 sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:h-14 sm:gap-3 sm:pb-0 sm:pl-4 [&>*]:shrink-0 sm:[&>*:first-child]:ml-auto">
           {children}
         </div>
       )}
