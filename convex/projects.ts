@@ -131,6 +131,7 @@ async function folderCounts(ctx: QueryCtx, project: Doc<"projects">) {
       .withIndex("by_project_and_superseded_by_video_id", (q) =>
         q.eq("projectId", project._id).eq("supersededByVideoId", undefined),
       )
+      .order("desc")
       .take(101),
     ctx.db
       .query("projects")
@@ -141,6 +142,7 @@ async function folderCounts(ctx: QueryCtx, project: Doc<"projects">) {
   ]);
   return {
     videoCount: videoPage.length === 101 ? 100 : videoPage.length,
+    lastUploadedAt: videoPage[0]?._creationTime,
     subfolderCount: subfolderPage.length === 101 ? 100 : subfolderPage.length,
     videoCountIsCapped: videoPage.length === 101,
     subfolderCountIsCapped: subfolderPage.length === 101,

@@ -106,6 +106,11 @@ export default defineSchema({
   })
     .index("by_project", ["projectId"])
     .index("by_project_and_superseded_by_video_id", ["projectId", "supersededByVideoId"])
+    .index("by_project_id_and_superseded_by_video_id_and_title", [
+      "projectId",
+      "supersededByVideoId",
+      "title",
+    ])
     .index("by_version_stack_id_and_version_number", ["versionStackId", "versionNumber"])
     .index("by_superseded_by_video_id", ["supersededByVideoId"])
     .index("by_public_id", ["publicId"])

@@ -253,6 +253,15 @@ body {
   background: var(--foreground-muted);
 }
 
+.scrollbar-hidden {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hidden::-webkit-scrollbar {
+  display: none;
+}
+
 /* Video.js customizations - keep dark for video player */
 .video-js {
   font-family: inherit;

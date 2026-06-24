@@ -23,6 +23,7 @@ const workflowStatusValidator = v.union(
 );
 
 const visibilityValidator = v.union(v.literal("public"), v.literal("private"));
+const dashboardSortValidator = v.union(v.literal("last-uploaded"), v.literal("alphabetical"));
 
 const VIDEO_DEPENDENT_DELETE_BATCH_DOCS = 8;
 export const MAX_VIDEO_STACK_SIZE = 100;
@@ -545,17 +546,27 @@ export const list = query({
   args: {
     projectId: v.id("projects"),
     paginationOpts: paginationOptsValidator,
+    sort: v.optional(dashboardSortValidator),
   },
   handler: async (ctx, args) => {
     await requireProjectAccess(ctx, args.projectId);
 
-    const result = await ctx.db
-      .query("videos")
-      .withIndex("by_project_and_superseded_by_video_id", (q) =>
-        q.eq("projectId", args.projectId).eq("supersededByVideoId", undefined),
-      )
-      .order("desc")
-      .paginate(args.paginationOpts);
+    const result =
+      args.sort === "alphabetical"
+        ? await ctx.db
+            .query("videos")
+            .withIndex("by_project_id_and_superseded_by_video_id_and_title", (q) =>
+              q.eq("projectId", args.projectId).eq("supersededByVideoId", undefined),
+            )
+            .order("asc")
+            .paginate(args.paginationOpts)
+        : await ctx.db
+            .query("videos")
+            .withIndex("by_project_and_superseded_by_video_id", (q) =>
+              q.eq("projectId", args.projectId).eq("supersededByVideoId", undefined),
+            )
+            .order("desc")
+            .paginate(args.paginationOpts);
 
     const page = await Promise.all(
       result.page.map(async (video) => {
